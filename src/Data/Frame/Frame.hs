@@ -50,6 +50,7 @@ verify xs is = checkLengths && checkIndex
 -- Pretty Printer
 -------------------------------------------------------------------------------
 
+-- adds additional Show constraint for the value.
 showDataFrame :: (Show v, Pretty i, Pretty k) => DataFrame i k v -> String
 showDataFrame (DataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ cols
   where
@@ -57,7 +58,10 @@ showDataFrame (DataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ cols
     cols = p : (map pcols $ unVector (M.toList dt)) -- show cols
 
     pcols :: (Show b, Pretty a) => (a, [b]) -> PB.Box
-    pcols (a, xs) = PB.vcat PB.left $ ([ppb a] ++ (map (PB.text . show) xs))
+    pcols (a, xs) = PB.vcat PB.left $ col ++ vals
+      where
+        col = [ppb a]
+        vals = map (PB.text . show) xs
 
     pix :: Pretty a => [a] -> PB.Box
     pix xs = PB.vcat PB.left (map ppb xs)

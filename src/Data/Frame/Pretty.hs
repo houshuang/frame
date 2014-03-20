@@ -18,6 +18,9 @@ instance Pretty Bool where
   ppr _ True = text "True"
   ppr _ False = text "False"
 
+instance Pretty Int where
+  ppr _ x = int x
+
 instance Pretty Integer where
   ppr _ x = integer x
 
@@ -28,7 +31,7 @@ instance Pretty Float where
   ppr _ x = float x
 
 instance Pretty Text where
-  ppr _ x = text (unpack x)
+  ppr _ x = text (show x)
 
 -- | Lift a pretty printable object into a box.
 ppb :: Pretty a => a -> PB.Box
