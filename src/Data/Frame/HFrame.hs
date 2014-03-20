@@ -28,11 +28,14 @@ module Data.Frame.HFrame (
   filter,
   ifilter,
   hcat,
+  fold,
+  map,
+  sum,
 
   showHDataFrame
 ) where
 
-import Prelude hiding (take, drop, filter)
+import Prelude hiding (take, drop, filter, sum, map)
 
 import Data.Frame.Pretty
 
@@ -119,8 +122,18 @@ instance Pretty Val where
 -- XXX: terrible hack, move to Interactive
 instance Num Val where
   fromInteger = I
-  (+) = undefined
-  (*) = undefined
+
+  (I x) + (I y) = I (x+y)
+  (D x) + (D y) = D (x+y)
+  _ + _ = error "non-numeric"
+
+  (I x) * (I y) = I (x*y)
+  (D x) * (D y) = D (x*y)
+  _ * _ = error "non-numeric"
+
+  negate (I x) = I (-x)
+  negate (D x) = D (-x)
+
   abs = undefined
   signum = undefined
 
@@ -146,32 +159,32 @@ fromLists xs cols is = fromMap kvs is
   where kvs = zip cols xs
 
 toVector :: [(t, [Val])] -> [(t, (V.Vector Val))]
-toVector = map (fmap V.fromList)
+toVector = L.map (fmap V.fromList)
 
 unVector :: [(t, (V.Vector Val))] -> [(t, [Val])]
-unVector = map (fmap V.toList)
+unVector = L.map (fmap V.toList)
 
 verify :: (Ord k, Ord i) => [(k, [Val])] -> [i] -> Bool
 verify xs is = checkIndex && checkAlike
   where
     n = length (snd (head xs))
 
-    checkLengths = all (==n) (map (length . snd) xs)
+    checkLengths = all (==n) (L.map (length . snd) xs)
     checkIndex = length is == n
-    checkAlike = and $ map (snd . fmap allAlike) xs
+    checkAlike = and $ L.map (snd . fmap allAlike) xs
 
 showHDataFrame :: (Pretty i, Pretty k) => HDataFrame i k -> String
 showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ cols
   where
     p = pix ix -- show index
-    cols = p : (map pcols $ unVector (M.toList dt)) -- show cols
+    cols = p : (L.map pcols $ unVector (M.toList dt)) -- show cols
 
     pcols (a, xs) = PB.vcat PB.left $ col ++ vals
       where
         col = [ppb a]
-        vals = map ppb xs
+        vals = L.map ppb xs
 
-    pix xs = PB.vcat PB.left (map ppb xs)
+    pix xs = PB.vcat PB.left (L.map ppb xs)
 
 -------------------------------------------------------------------------------
 -- Deconstructors
@@ -219,7 +232,7 @@ instance Convertible a => Convertible (Maybe a) where
 
 -- convienance conversion routines
 vlist :: Convertible a => [a] -> [Val]
-vlist xs = map vconvert xs
+vlist xs = L.map vconvert xs
 
 vmap :: Convertible a => M.HashMap k a -> M.HashMap k Val
 vmap xs = M.map vconvert xs
@@ -231,9 +244,9 @@ vmap xs = M.map vconvert xs
 -- XXX these are really unoptimal, fix later
 
 alignVecs :: [V.Vector Val] -> [V.Vector Val]
-alignVecs xs = map pad xs
+alignVecs xs = L.map pad xs
   where
-    mlen = maximum $ map V.length xs
+    mlen = maximum $ L.map V.length xs
     mkEmpty n v = V.replicate n (def (V.head v))
 
     -- insert default elements if the
@@ -292,4 +305,20 @@ filter p (HDataFrame dt ix) = HDataFrame (M.filterWithKey (\k _ -> p k) dt) ix
 
 -- Horizontal concatentation of frames.
 hcat :: (Eq i, Eq k, Hashable k) => HDataFrame i k -> HDataFrame i k -> HDataFrame i k
-hcat (HDataFrame dt ix) (HDataFrame dt' ix') | ix == ix' = HDataFrame (alignMaps $ M.union dt dt') ix
+hcat (HDataFrame dt ix) (HDataFrame dt' ix') = HDataFrame (alignMaps $ M.union dt dt') ix
+
+map :: Eq k => (Val -> Val) -> k -> HDataFrame i k -> HDataFrame i k
+map f k dt = transform fn id dt
+  where
+    fn k' elts | k' == k   = pure $ V.map f elts
+               | otherwise = pure $ elts
+
+fold :: (Ord i, Ord k, Hashable k)
+      => (Val -> Val -> Val)
+      -> k
+      -> HDataFrame i k
+      -> HDataFrame i k
+fold f k (HDataFrame dt ix) = fromMap [(k, [V.foldl1' f (dt M.! k)])] []
+
+sum :: (Ord i, Ord k, Hashable k) => k -> HDataFrame i k -> HDataFrame i k
+sum k = fold (+) k
