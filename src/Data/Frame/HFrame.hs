@@ -55,7 +55,6 @@ import qualified Data.HashSet as S
 import qualified Data.List as L
 
 import Data.Data
-import Data.Monoid
 import Data.DateTime
 import Data.Typeable
 import Data.Functor.Identity
@@ -122,7 +121,7 @@ allAlike xs = all (like t) xs
 -- The heterogeneously typed dataframe.
 data HDataFrame i k = HDataFrame
   { _hdfdata :: !(M.HashMap k (V.Vector Val))
-  , _hdfindex  :: [i]
+  , _hdfindex  :: V.Vector i
   } deriving (Eq)
 
 instance Hashable Val where
@@ -183,7 +182,7 @@ transp rows = V.map V.head rows `V.cons` (transp (V.map V.tail rows))
 
 -- | Construct hdataframe from a Map.
 fromMap :: (Hashable k, Ord k, Ord i) => [(k, [Val])] -> [i] -> HDataFrame i k
-fromMap xs is = HDataFrame (M.fromList $ aligned) is
+fromMap xs is = HDataFrame (M.fromList $ aligned) (V.fromList is)
   where
     -- XXX: fix verify check later
     aligned = alignCols $ toVector xs
@@ -194,17 +193,16 @@ fromLists xs cols is = fromMap kvs is
   where kvs = zip cols xs
 
 fromVectors :: (Hashable k, Ord k) => V.Vector (V.Vector Val) -> [k] -> HDataFrame Int k
-fromVectors xs cols = HDataFrame (M.fromList $ zip cols ls) [0..m]
+fromVectors xs cols = HDataFrame (M.fromList $ zip cols ls) (V.fromList [0..m])
   where
     m = V.length xs
     n = V.length (V.head xs)
 
     -- XXX: stupidly inefficient
     ls = L.map V.fromList $ L.transpose $ L.map V.toList (V.toList xs)
-    cv k xs = (k, xs)
 
 singleton :: (Ord k, Hashable k) => k -> [Val] -> HDataFrame i k
-singleton k v = HDataFrame (M.fromList $ toVector [(k, v)]) []
+singleton k v = HDataFrame (M.fromList $ toVector [(k, v)]) (V.empty)
 
 toVector :: [(t, [Val])] -> [(t, (V.Vector Val))]
 toVector = L.map (fmap V.fromList)
@@ -224,7 +222,7 @@ verify xs is = checkIndex && checkAlike
 showHDataFrame :: (Pretty i, Pretty k) => HDataFrame i k -> String
 showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ cols
   where
-    p = pix ix -- show index
+    p = pix (V.toList ix) -- show index
     cols = p : (L.map pcols $ unVector (M.toList dt)) -- show cols
 
     pcols (a, xs) = PB.vcat PB.left $ col ++ vals
@@ -242,7 +240,7 @@ showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ cols
 --  f : transforms data keywise
 --  g : transforms the index
 transform :: (k -> V.Vector Val -> Identity (V.Vector Val))
-           -> ([i] -> [j])
+           -> (V.Vector i -> V.Vector j)
            -> HDataFrame i k
            -> HDataFrame j k
 transform f g (HDataFrame dt ix) = HDataFrame dt' ix'
@@ -321,42 +319,42 @@ alignMaps dt = M.fromList $ alignCols (M.toList dt)
 -- Select row by label.
 iloc :: Eq i => HDataFrame i k -> i -> Maybe (HDataFrame i k)
 iloc (HDataFrame dt ix) i =
-  case L.elemIndex i ix of
-    Just i' -> Just $ HDataFrame (M.map (\x -> V.singleton (x V.! i')) dt) [i]
+  case V.elemIndex i ix of
+    Just i' -> Just $ HDataFrame (M.map (\x -> V.singleton (x V.! i')) dt) (V.singleton i)
     Nothing -> Nothing
 
 take :: Int -> HDataFrame i k -> HDataFrame i k
-take n (HDataFrame dt ix) = HDataFrame (M.map (V.take n) dt) (L.take n ix)
+take n (HDataFrame dt ix) = HDataFrame (M.map (V.take n) dt) (V.take n ix)
 
 drop :: Int -> HDataFrame i k -> HDataFrame i k
-drop n (HDataFrame dt ix) = HDataFrame (M.map (V.drop n) dt) (L.drop n ix)
+drop n (HDataFrame dt ix) = HDataFrame (M.map (V.drop n) dt) (V.drop n ix)
 
 slice :: Int -> Int -> HDataFrame i k -> HDataFrame i k
-slice i j (HDataFrame dt ix) = HDataFrame (M.map (V.slice i j) dt) (lslice i j ix)
-  where
-    lslice start end = L.take (end - start + 1) . L.drop start
+slice i j (HDataFrame dt ix) = HDataFrame (M.map (V.slice i j) dt) (V.slice i j ix)
+  {-where-}
+    {-lslice start end = L.take (end - start + 1) . L.drop start-}
 
 -- Filter rows by predicate on label.
 ifilter :: (i -> Bool) -> HDataFrame i k -> HDataFrame i k
 ifilter p df@(HDataFrame _ ix) = transform f g df
   where
     -- find labels locations matching predicate
-    torm = S.fromList $ L.findIndices p ix
+    torm = S.fromList $ V.toList $ V.findIndices p ix
 
     -- Filter the rows on the label locations
     f _ elts = pure $ V.ifilter (\i _ -> (i `S.member` torm)) elts
-    g = L.filter p
+    g = V.filter p
 
 -- Select rows by a list of labels.
 ifilters :: (Eq i, Hashable i) => HDataFrame i k -> [i] -> HDataFrame i k
 ifilters df@(HDataFrame _ ix) is = transform f g df
   where
     is' = S.fromList is
-    torm = S.fromList $ L.findIndices (\x -> x `S.member` is') ix
+    torm = S.fromList $ L.findIndices (\x -> x `S.member` is') (V.toList ix)
 
     -- Filter the rows on the label locations
     f _ elts = pure $ V.ifilter (\i _ -> (i `S.member` torm)) elts
-    g = L.filter (\x -> x `S.member` is')
+    g = V.filter (\x -> x `S.member` is')
 
 -- Filter by predicate on column.
 filter :: (k -> Bool) -> HDataFrame i k -> HDataFrame i k
@@ -386,7 +384,7 @@ foldAll :: (Ord i, Ord k, Hashable k)
       => (Val -> Val -> Val)
       -> HDataFrame i k
       -> HDataFrame i k
-foldAll f (HDataFrame dt ix) = HDataFrame (M.map fn dt) []
+foldAll f (HDataFrame dt ix) = HDataFrame (M.map fn dt) V.empty
   where
     fn xs = V.singleton $ V.foldl1' f xs
 
