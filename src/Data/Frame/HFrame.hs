@@ -7,10 +7,13 @@
 
 module Data.Frame.HFrame (
   HDataFrame,
-  Val,
+  Val(..),
+  schema,
 
   fromMap,
   fromLists,
+  fromVectors,
+  singleton,
 
   vlist,
   vmap,
@@ -52,6 +55,7 @@ import qualified Data.HashSet as S
 import qualified Data.List as L
 
 import Data.Data
+import Data.Monoid
 import Data.DateTime
 import Data.Typeable
 import Data.Functor.Identity
@@ -73,7 +77,7 @@ data Val
   | B !Bool
   | M !(Maybe Val)
   | Dt DateTime
-  deriving (Eq, Show, Data, Generic, Typeable)
+  deriving (Eq, Show, Ord, Data, Generic, Typeable)
 
 -- default values for padding
 def :: Val -> Val
@@ -83,6 +87,11 @@ def (S _) = S $ pack ""
 def (B _) = B False
 def (M _) = M Nothing
 def (Dt _) = Dt $ startOfTime
+
+-- XXX less magical
+ty :: Val -> String
+ty (M (Just v)) = "maybe[" ++ (show (toConstr v)) ++ "]"
+ty v = show (toConstr v)
 
 isNa :: Val -> Bool
 isNa (M Nothing) = True
@@ -161,6 +170,13 @@ instance Fractional Val where
   recip = undefined
   fromRational = D . fromRational
 
+-- Show the type schema for the dataframe.
+schema :: HDataFrame i k -> [String]
+schema (HDataFrame dt _) = L.map (ty . V.head) $ M.elems dt
+
+transp :: V.Vector (V.Vector a) -> V.Vector (V.Vector a)
+transp rows = V.map V.head rows `V.cons` (transp (V.map V.tail rows))
+
 -------------------------------------------------------------------------------
 -- Constructors
 -------------------------------------------------------------------------------
@@ -169,7 +185,7 @@ instance Fractional Val where
 fromMap :: (Hashable k, Ord k, Ord i) => [(k, [Val])] -> [i] -> HDataFrame i k
 fromMap xs is = HDataFrame (M.fromList $ aligned) is
   where
-    -- XXX: fix later
+    -- XXX: fix verify check later
     aligned = alignCols $ toVector xs
 
 -- | Construct hdataframe from a list of Lists.
@@ -177,6 +193,17 @@ fromLists :: (Hashable k, Ord k, Ord i) => [[Val]] -> [k] -> [i] -> HDataFrame i
 fromLists xs cols is = fromMap kvs is
   where kvs = zip cols xs
 
+fromVectors :: (Hashable k, Ord k) => V.Vector (V.Vector Val) -> [k] -> HDataFrame Int k
+fromVectors xs cols = HDataFrame (M.fromList $ zip cols ls) [0..m]
+  where
+    m = V.length xs
+    n = V.length (V.head xs)
+
+    -- XXX: stupidly inefficient
+    ls = L.map V.fromList $ L.transpose $ L.map V.toList (V.toList xs)
+    cv k xs = (k, xs)
+
+singleton :: (Ord k, Hashable k) => k -> [Val] -> HDataFrame i k
 singleton k v = HDataFrame (M.fromList $ toVector [(k, v)]) []
 
 toVector :: [(t, [Val])] -> [(t, (V.Vector Val))]

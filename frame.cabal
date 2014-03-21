@@ -19,6 +19,7 @@ library
     Data.Frame.Frame
     Data.Frame.HFrame
     Data.Frame.Pretty
+    Data.Frame.CSV
     Data.Frame.Interactive
 
   ghc-options:        
@@ -37,6 +38,10 @@ library
     unordered-containers  >= 0.2.3,
     time                  >= 1.4.0,
     datetime              >= 0.2.0,
+
+    cassava               >= 0.3.0,
+    bytestring            >= 0.10.4,
+    attoparsec            >= 0.11.2,
 
     mtl -any,
     transformers -any,
