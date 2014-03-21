@@ -7,7 +7,6 @@ module Data.Frame.CSV (
 
 import Data.Frame.HFrame (HDataFrame, Val(..), fromVectors)
 
-import Debug.Trace
 import Control.Applicative
 
 import Data.Vector
