@@ -7,17 +7,17 @@
 
 module Data.Frame.HFrame (
   HDataFrame,
+  Val,
 
   fromMap,
   fromLists,
 
-  Val,
   vlist,
   vmap,
   vconvert,
+  sim,
 
   transform,
-
   alignVecs,
 
   (!),
@@ -27,10 +27,13 @@ module Data.Frame.HFrame (
   slice,
   filter,
   ifilter,
+  ifilters,
   hcat,
   fold,
+  foldAll,
   map,
   sum,
+  mean,
 
   showHDataFrame
 ) where
@@ -81,6 +84,15 @@ def (B _) = B False
 def (M _) = M Nothing
 def (Dt _) = Dt $ startOfTime
 
+isNa :: Val -> Bool
+isNa (M Nothing) = True
+isNa _ = False
+
+sim :: Integral a => Val -> a -> Val
+sim (D _) = D . fromIntegral
+sim (I _) = I . fromIntegral
+sim (M (Just x)) = M . Just . sim x
+sim _ = const $ M Nothing
 
 like :: Val -> Val -> Bool
 like (D _) (D _) = True
@@ -125,11 +137,13 @@ instance Num Val where
 
   (I x) + (I y) = I (x+y)
   (D x) + (D y) = D (x+y)
-  _ + _ = error "non-numeric"
+  (M (Just x)) + (M (Just y)) = M (Just $ x + y)
+  _ + _ = M Nothing
 
   (I x) * (I y) = I (x*y)
   (D x) * (D y) = D (x*y)
-  _ * _ = error "non-numeric"
+  (M (Just x)) * (M (Just y)) = M (Just $ x * y)
+  _ * _ = M Nothing
 
   negate (I x) = I (-x)
   negate (D x) = D (-x)
@@ -138,7 +152,12 @@ instance Num Val where
   signum = undefined
 
 instance Fractional Val where
-  (/) = undefined
+  (I x) / (I y) = I (x `div` y)
+  (D x) / (D y) = D (x / y)
+  (M (Just x)) / (M (Just y)) = M (Just $ x / y)
+  {-x / y = error $ (show x) ++ (show y)-}
+  x / y = M Nothing
+
   recip = undefined
   fromRational = D . fromRational
 
@@ -157,6 +176,8 @@ fromMap xs is = HDataFrame (M.fromList $ aligned) is
 fromLists :: (Hashable k, Ord k, Ord i) => [[Val]] -> [k] -> [i] -> HDataFrame i k
 fromLists xs cols is = fromMap kvs is
   where kvs = zip cols xs
+
+singleton k v = HDataFrame (M.fromList $ toVector [(k, v)]) []
 
 toVector :: [(t, [Val])] -> [(t, (V.Vector Val))]
 toVector = L.map (fmap V.fromList)
@@ -288,7 +309,7 @@ slice i j (HDataFrame dt ix) = HDataFrame (M.map (V.slice i j) dt) (lslice i j i
   where
     lslice start end = L.take (end - start + 1) . L.drop start
 
--- Filter by predicate on label.
+-- Filter rows by predicate on label.
 ifilter :: (i -> Bool) -> HDataFrame i k -> HDataFrame i k
 ifilter p df@(HDataFrame _ ix) = transform f g df
   where
@@ -299,6 +320,17 @@ ifilter p df@(HDataFrame _ ix) = transform f g df
     f _ elts = pure $ V.ifilter (\i _ -> (i `S.member` torm)) elts
     g = L.filter p
 
+-- Select rows by a list of labels.
+ifilters :: (Eq i, Hashable i) => HDataFrame i k -> [i] -> HDataFrame i k
+ifilters df@(HDataFrame _ ix) is = transform f g df
+  where
+    is' = S.fromList is
+    torm = S.fromList $ L.findIndices (\x -> x `S.member` is') ix
+
+    -- Filter the rows on the label locations
+    f _ elts = pure $ V.ifilter (\i _ -> (i `S.member` torm)) elts
+    g = L.filter (\x -> x `S.member` is')
+
 -- Filter by predicate on column.
 filter :: (k -> Bool) -> HDataFrame i k -> HDataFrame i k
 filter p (HDataFrame dt ix) = HDataFrame (M.filterWithKey (\k _ -> p k) dt) ix
@@ -307,12 +339,14 @@ filter p (HDataFrame dt ix) = HDataFrame (M.filterWithKey (\k _ -> p k) dt) ix
 hcat :: (Eq i, Eq k, Hashable k) => HDataFrame i k -> HDataFrame i k -> HDataFrame i k
 hcat (HDataFrame dt ix) (HDataFrame dt' ix') = HDataFrame (alignMaps $ M.union dt dt') ix
 
+-- Map function across a single column.
 map :: Eq k => (Val -> Val) -> k -> HDataFrame i k -> HDataFrame i k
 map f k dt = transform fn id dt
   where
     fn k' elts | k' == k   = pure $ V.map f elts
                | otherwise = pure $ elts
 
+-- Left fold function across a single column.
 fold :: (Ord i, Ord k, Hashable k)
       => (Val -> Val -> Val)
       -> k
@@ -320,5 +354,25 @@ fold :: (Ord i, Ord k, Hashable k)
       -> HDataFrame i k
 fold f k (HDataFrame dt ix) = fromMap [(k, [V.foldl1' f (dt M.! k)])] []
 
+-- Fold all columns.
+foldAll :: (Ord i, Ord k, Hashable k)
+      => (Val -> Val -> Val)
+      -> HDataFrame i k
+      -> HDataFrame i k
+foldAll f (HDataFrame dt ix) = HDataFrame (M.map fn dt) []
+  where
+    fn xs = V.singleton $ V.foldl1' f xs
+
+-- Sum a single column.
 sum :: (Ord i, Ord k, Hashable k) => k -> HDataFrame i k -> HDataFrame i k
 sum k = fold (+) k
+
+mean :: (Ord i, Ord k, Hashable k) => k -> HDataFrame i k -> HDataFrame i k
+mean k (HDataFrame dt ix) = singleton k $ [m / (sim m n)]
+  where
+    m = V.foldl1' (+) v
+    n = V.length v
+    v = dt M.! k
+
+dropna :: (Ord i, Ord k, Hashable k) => k -> HDataFrame i k -> HDataFrame i k
+dropna = undefined
