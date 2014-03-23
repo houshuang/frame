@@ -1,53 +1,64 @@
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module Data.Frame.HFrame (
   HDataFrame,
-  Val(..),
+  showHDataFrame,
+
+  nrows,
+  ncols,
+  transformIndex,
+  transformKeys,
+
+  Block(..),
+  dblock,
+  iblock,
+  bblock,
+  mblock,
+  sblock,
+  blen,
+
   schema,
 
   fromMap,
-  fromLists,
-  fromVectors,
-  singleton,
-
-  vlist,
-  vmap,
-  vconvert,
-  sim,
-
-  transform,
-  alignVecs,
+  fromBlocks,
+  column,
 
   (!),
   iloc,
   take,
   drop,
   slice,
+
   filter,
   ifilter,
   ifilters,
-  hcat,
-  fold,
-  foldAll,
-  map,
-  sum,
-  mean,
 
-  showHDataFrame
+  mapNum,
+  mapOrd,
+  mapFrac,
+
+  hcat,
+
+  sum,
+  sumCol,
+
+  mean,
+  meanCol
+
 ) where
 
-import Prelude hiding (take, drop, filter, sum, map)
+import Prelude hiding (take, drop, filter, sum)
 
 import Data.Frame.Pretty
 
-import qualified Data.Vector as V
-import qualified Data.Vector.Generic as VG
-import qualified Data.Vector.Mutable as VM
+import qualified Data.Vector as VB
+import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Algorithms.Merge as VS
 
 import qualified Data.HashMap.Strict as M
@@ -55,175 +66,117 @@ import qualified Data.HashSet as S
 import qualified Data.List as L
 
 import Data.Data
-import Data.DateTime
+{-import Data.DateTime-}
 import Data.Typeable
-import Data.Functor.Identity
 import Data.Hashable (Hashable(..))
 
 import Text.PrettyPrint hiding (hcat)
-import Data.Text (Text, pack)
-import GHC.Generics
-
-import Control.Applicative
+import Data.Text (Text, pack, unpack)
+import qualified GHC.Float as GHC
 
 import qualified Text.PrettyPrint.Boxes as PB
 
--- Heterogeneous value
-data Val
-  = D !Double
-  | I !Integer
-  | S !Text
-  | B !Bool
-  | M !(Maybe Val)
-  | Dt DateTime
-  deriving (Eq, Show, Ord, Data, Generic, Typeable)
+type Index i = V.Vector i
 
--- default values for padding
-def :: Val -> Val
-def (D _) = D 0.0
-def (I _) = I 0
-def (S _) = S $ pack ""
-def (B _) = B False
-def (M _) = M Nothing
-def (Dt _) = Dt $ startOfTime
+class (Eq k, Show k, Hashable k) => Columnable k where
+class (Ord i, Show i, V.Unbox i, Default i) => Indexable i where
 
--- XXX less magical
-ty :: Val -> String
-ty (M (Just v)) = "maybe[" ++ (show (toConstr v)) ++ "]"
-ty v = show (toConstr v)
+instance Columnable Int
+instance Columnable String
+instance Columnable Text
+instance Columnable Bool
 
-isNa :: Val -> Bool
-isNa (M Nothing) = True
-isNa _ = False
-
-sim :: Integral a => Val -> a -> Val
-sim (D _) = D . fromIntegral
-sim (I _) = I . fromIntegral
-sim (M (Just x)) = M . Just . sim x
-sim _ = const $ M Nothing
-
-like :: Val -> Val -> Bool
-like (D _) (D _) = True
-like (I _) (I _) = True
-like (S _) (S _) = True
-like (B _) (B _) = True
-like (M (Just a)) (M (Just b)) = like a b
-like (M (Just _)) (M Nothing) = True
-like (M (Nothing)) (M (Just _)) = True
-like (M (Nothing)) (M Nothing) = True
-like (Dt _) (Dt _) = True
-like _ _ = False
-
-allAlike :: [Val] -> Bool
-allAlike xs = all (like t) xs
-  where t = head xs
+instance Indexable Int
+instance Indexable Double
+instance Indexable Float
+instance Indexable Bool
+{-instance Indexable DateTime-}
 
 -- The heterogeneously typed dataframe.
 data HDataFrame i k = HDataFrame
-  { _hdfdata :: !(M.HashMap k (V.Vector Val))
-  , _hdfindex  :: V.Vector i
+  { _hdfdata :: !(M.HashMap k Block)
+  , _hdfindex :: !(Index i)
   } deriving (Eq)
 
-instance Hashable Val where
-  hashWithSalt s (D v) = (0 :: Int) `hashWithSalt` (hashWithSalt s v)
-  hashWithSalt s (I v) = (1 :: Int) `hashWithSalt` (hashWithSalt s v)
-  hashWithSalt s (S v) = (2 :: Int) `hashWithSalt` (hashWithSalt s v)
-  hashWithSalt s (B v) = (3 :: Int) `hashWithSalt` (hashWithSalt s v)
-  hashWithSalt s (M v) = (4 :: Int) `hashWithSalt` (hashWithSalt s v)
+data Block
+  = DBlock !(V.Vector Double)
+  | IBlock !(V.Vector Int)
+  | BBlock !(V.Vector Bool)
+  | MBlock {
+     mdata  :: !Block
+   , bitmap :: !(V.Vector Bool)
+   }
+  | SBlock !(VB.Vector Text)
+  deriving (Eq, Show, Data, Typeable)
 
-instance Pretty Val where
-  ppr p (D n) = ppr p n
-  ppr p (I n) = ppr p n
-  ppr p (S n) = ppr p n
-  ppr p (B n) = ppr p n
-  ppr p (M Nothing) = text "NA"
-  ppr p (M (Just n)) = ppr p n
+bblock :: [Bool] -> Block
+bblock = BBlock . V.fromList
 
--- XXX: terrible hack, move to Interactive
-instance Num Val where
-  fromInteger = I
+dblock :: [Double] -> Block
+dblock = DBlock . V.fromList
 
-  (I x) + (I y) = I (x+y)
-  (D x) + (D y) = D (x+y)
-  (M (Just x)) + (M (Just y)) = M (Just $ x + y)
-  _ + _ = M Nothing
+iblock :: [Int] -> Block
+iblock = IBlock . V.fromList
 
-  (I x) * (I y) = I (x*y)
-  (D x) * (D y) = D (x*y)
-  (M (Just x)) * (M (Just y)) = M (Just $ x * y)
-  _ * _ = M Nothing
+sblock :: [Text] -> Block
+sblock = SBlock . VB.fromList
 
-  negate (I x) = I (-x)
-  negate (D x) = D (-x)
+mblock :: Block -> [Bool] -> Block
+mblock dat@(DBlock _) mask = MBlock dat (V.fromList mask)
+mblock dat@(IBlock _) mask = MBlock dat (V.fromList mask)
+mblock dat@(BBlock _) mask = MBlock dat (V.fromList mask)
+mblock _ _ = error "unsupported masked block"
 
-  abs = undefined
-  signum = undefined
-
-instance Fractional Val where
-  (I x) / (I y) = I (x `div` y)
-  (D x) / (D y) = D (x / y)
-  (M (Just x)) / (M (Just y)) = M (Just $ x / y)
-  {-x / y = error $ (show x) ++ (show y)-}
-  x / y = M Nothing
-
-  recip = undefined
-  fromRational = D . fromRational
-
--- Show the type schema for the dataframe.
-schema :: HDataFrame i k -> [String]
-schema (HDataFrame dt _) = L.map (ty . V.head) $ M.elems dt
-
-transp :: V.Vector (V.Vector a) -> V.Vector (V.Vector a)
-transp rows = V.map V.head rows `V.cons` (transp (V.map V.tail rows))
+schema :: HDataFrame t k -> [(k, String)]
+schema (HDataFrame dt _) = L.map (fmap $ show . toConstr) (M.toList dt)
 
 -------------------------------------------------------------------------------
 -- Constructors
 -------------------------------------------------------------------------------
 
 -- | Construct hdataframe from a Map.
-fromMap :: (Hashable k, Ord k, Ord i) => [(k, [Val])] -> [i] -> HDataFrame i k
-fromMap xs is = HDataFrame (M.fromList $ aligned) (V.fromList is)
+fromMap :: (Columnable k, V.Unbox i, Num i, Enum i) => [(k, Block)] -> HDataFrame i k
+fromMap xs = HDataFrame df_data df_ix
   where
-    -- XXX: fix verify check later
-    aligned = alignCols $ toVector xs
+    df_data = M.fromList $ aligned
+    df_ix   = V.enumFromTo 0 (fromIntegral nrows)
 
--- | Construct hdataframe from a list of Lists.
-fromLists :: (Hashable k, Ord k, Ord i) => [[Val]] -> [k] -> [i] -> HDataFrame i k
-fromLists xs cols is = fromMap kvs is
-  where kvs = zip cols xs
+    aligned = alignCols xs
 
-fromVectors :: (Hashable k, Ord k) => V.Vector (V.Vector Val) -> [k] -> HDataFrame Int k
-fromVectors xs cols = HDataFrame (M.fromList $ zip cols ls) (V.fromList [0..m])
+    nrows :: Int
+    nrows = blen $ snd $ head aligned
+
+    ncols :: Int
+    ncols = L.length aligned
+
+fromBlocks :: (Eq k, Hashable k) => [Block] -> [k] -> HDataFrame Int k
+fromBlocks xs cols = HDataFrame (M.fromList $ zip cols xs) df_ix
   where
-    m = V.length xs
-    n = V.length (V.head xs)
+    df_ix = V.enumFromTo 0 (fromIntegral nrows)
+    ncols = length xs
+    nrows = maximum (map blen xs)
 
-    -- XXX: stupidly inefficient
-    ls = L.map V.fromList $ L.transpose $ L.map V.toList (V.toList xs)
+-- | Construct a dataframe from a singular index, key and block.
+column :: Columnable k => k -> V.Vector i -> Block -> HDataFrame i k
+column k i v = HDataFrame (M.fromList $ [(k, v)]) i
 
-singleton :: (Ord k, Hashable k) => k -> [Val] -> HDataFrame i k
-singleton k v = HDataFrame (M.fromList $ toVector [(k, v)]) (V.empty)
+-- | Construct a dataframe from a vector of
+row :: Indexable i => V.Vector i -> V.Vector k -> HDataFrame i k
+row = undefined
 
-toVector :: [(t, [Val])] -> [(t, (V.Vector Val))]
-toVector = L.map (fmap V.fromList)
+-------------------------------------------------------------------------------
+-- Pretty Printing
+-------------------------------------------------------------------------------
 
-unVector :: [(t, (V.Vector Val))] -> [(t, [Val])]
-unVector = L.map (fmap V.toList)
+unText :: [Text] -> [String]
+unText = L.map unpack
 
-verify :: (Ord k, Ord i) => [(k, [Val])] -> [i] -> Bool
-verify xs is = checkIndex && checkAlike
+showHDataFrame :: (Pretty i, Pretty k, V.Unbox i) => HDataFrame i k -> String
+showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ body
   where
-    n = length (snd (head xs))
-
-    checkLengths = all (==n) (L.map (length . snd) xs)
-    checkIndex = length is == n
-    checkAlike = and $ L.map (snd . fmap allAlike) xs
-
-showHDataFrame :: (Pretty i, Pretty k) => HDataFrame i k -> String
-showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ cols
-  where
-    p = pix (V.toList ix) -- show index
-    cols = p : (L.map pcols $ unVector (M.toList dt)) -- show cols
+    index = pix (V.toList ix) -- show index
+    cols = (L.map pcols $ showBlocks (M.toList dt)) -- show cols
+    body = index : cols
 
     pcols (a, xs) = PB.vcat PB.left $ col ++ vals
       where
@@ -232,172 +185,263 @@ showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ cols
 
     pix xs = PB.vcat PB.left (L.map ppb xs)
 
+showBlocks ::  [(a, Block)] -> [(a, [String])]
+showBlocks = L.map (fmap showBlock)
+  where
+    showBlock (IBlock xs) = L.map show $ V.toList xs
+    showBlock (DBlock xs) = L.map show $ V.toList xs
+    showBlock (BBlock xs) = L.map show $ V.toList xs
+    showBlock (SBlock xs) = unText (VB.toList xs)
+    showBlock (MBlock xs bm) = zipWith unpackMissing (showBlock xs) (V.toList bm)
+      where
+        unpackMissing a True = a
+        unpackMissing _ False = "na"
+
 -------------------------------------------------------------------------------
 -- Deconstructors
 -------------------------------------------------------------------------------
 
--- Reconstruct the dataframe by applying two functions over it's structure.
---  f : transforms data keywise
---  g : transforms the index
-transform :: (k -> V.Vector Val -> Identity (V.Vector Val))
-           -> (V.Vector i -> V.Vector j)
-           -> HDataFrame i k
-           -> HDataFrame j k
-transform f g (HDataFrame dt ix) = HDataFrame dt' ix'
-  where dt' = runIdentity $ M.traverseWithKey f dt
-        ix' = g ix
-
--------------------------------------------------------------------------------
--- Conversion
--------------------------------------------------------------------------------
-
-class Convertible a where
-  vconvert :: a -> Val
-
-instance Convertible Integer where
-  vconvert = I
-
-instance Convertible Int where
-  vconvert = I . fromIntegral
-
-instance Convertible Double where
-  vconvert = D
-
-instance Convertible Text where
-  vconvert = S
-
-instance Convertible String where
-  vconvert = S . pack
-
-instance Convertible Bool where
-  vconvert = B
-
-instance Convertible a => Convertible (Maybe a) where
-  vconvert (Just a) = M (Just (vconvert a))
-  vconvert (Nothing) = M Nothing
-
--- convienance conversion routines
-vlist :: Convertible a => [a] -> [Val]
-vlist xs = L.map vconvert xs
-
-vmap :: Convertible a => M.HashMap k a -> M.HashMap k Val
-vmap xs = M.map vconvert xs
-
--------------------------------------------------------------------------------
--- Alignment
--------------------------------------------------------------------------------
-
--- XXX these are really unoptimal, fix later
-
-alignVecs :: [V.Vector Val] -> [V.Vector Val]
-alignVecs xs = L.map pad xs
+mapMask :: (V.Unbox a) => (a -> a) -> V.Vector a -> V.Vector Bool -> V.Vector a
+mapMask f xs ys = V.zipWith (go f) xs ys
   where
-    mlen = maximum $ L.map V.length xs
-    mkEmpty n v = V.replicate n (def (V.head v))
+    go :: (a -> a) -> a -> Bool -> a
+    go f' x y | y == True = f' x
+              | otherwise = x
 
-    -- insert default elements if the
-    pad x | V.length x < mlen = (V.++) x (mkEmpty (mlen - (V.length x)) x)
-          | otherwise = x
+-- hack to allow us to apply Fractional functions over Integral columsn, unsafe with respect to
+-- overflow/underflow
+castDoubleTransform :: (Double -> Double) -> Int -> Int
+castDoubleTransform f = GHC.double2Int . f . GHC.int2Double
 
-alignCols :: [(k, V.Vector Val)] -> [(k, V.Vector Val)]
+-- Transform the index
+transformIndex :: (Indexable a, Indexable b) => (a -> b) -> HDataFrame a k -> HDataFrame b k
+transformIndex f (HDataFrame dt ix) = HDataFrame dt (V.map f ix)
+
+-- Transform the columns
+transformKeys :: (Columnable a, Columnable b) => (a -> b) -> HDataFrame i a -> HDataFrame i b
+transformKeys f (HDataFrame dt ix) = HDataFrame dt' ix
+  where dt' = M.fromList [((f k), v) | (k, v) <- M.toList dt]
+
+
+-- Apply a function over an unparameterized type, we can't implement Functor because of the heteregenous
+-- typing of the block structure so this just reaches inside and applies regardless of what the underlying
+-- structure of the block is, V.Vector, VB.Vector, List, etc...
+class Apply f where
+  mapNum  :: (forall t. Num t => t -> t) -> f -> f
+  mapFrac :: (forall t. Fractional t => t -> t) -> f -> f
+  mapEq   :: (forall t. Eq t => t -> t) -> f -> f
+  mapOrd  :: (forall t. Ord t => t -> t) -> f -> f
+
+  foldNum  :: (forall t. Num t => t -> t -> t) -> f -> f
+  {-foldFrac :: (forall t. Fractional t => t -> t -> t) -> f -> f-}
+  {-foldEq   :: (forall t. Eq t => t -> t -> t) -> f -> f-}
+  {-foldOrd  :: (forall t. Ord t => t -> t -> t) -> f -> f-}
+
+  -- Apply directly to the underlying unboxed structure.
+  applyVec :: (forall a. V.Unbox a => V.Vector a -> V.Vector a) -> f -> f
+
+instance Apply Block where
+  mapNum f (DBlock xs) = DBlock $ V.map f xs
+  mapNum f (MBlock (DBlock xs) bm) = MBlock (DBlock $ mapMask f xs bm) bm
+  mapNum f (MBlock (IBlock xs) bm) = MBlock (IBlock $ mapMask f xs bm) bm
+  mapNum f (IBlock xs) = IBlock $ V.map f xs
+  mapNum _ x = x
+
+  mapFrac f (IBlock xs) = IBlock $ V.map (castDoubleTransform f) xs
+  mapFrac f (DBlock xs) = DBlock $ V.map f xs
+  mapFrac f (MBlock (DBlock xs) bm) = MBlock (DBlock $ mapMask f xs bm) bm
+  mapFrac f (MBlock (IBlock xs) bm) = MBlock (IBlock $ mapMask (castDoubleTransform f) xs bm) bm
+  mapFrac _ x = x
+
+  mapEq f (DBlock xs) = DBlock $ V.map f xs
+  mapEq f (MBlock (DBlock xs) bm) = MBlock (DBlock $ mapMask f xs bm) bm
+  mapEq f (MBlock (IBlock xs) bm) = MBlock (IBlock $ mapMask (castDoubleTransform f) xs bm) bm
+  mapEq f (IBlock xs) = IBlock $ V.map (castDoubleTransform f) xs
+  mapEq _ x = x
+
+  mapOrd f (DBlock xs) = DBlock $ V.map f xs
+  mapOrd f (MBlock (DBlock xs) bm) = MBlock (DBlock $ mapMask f xs bm) bm
+  mapOrd f (MBlock (IBlock xs) bm) = MBlock (IBlock $ mapMask (castDoubleTransform f) xs bm) bm
+  mapOrd f (IBlock xs) = IBlock $ V.map (castDoubleTransform f) xs
+  mapOrd _ x = x
+
+  foldNum f (DBlock xs) = DBlock $ V.singleton $ V.foldl1 f xs
+  foldNum f (IBlock xs) = IBlock $ V.singleton $ V.foldl1 f xs
+  -- XXX Folds over bitmasked blocks can yield different results depending on if we ignore or use NA values.
+  foldNum _ _ = mblock (iblock [0]) [False]
+
+  applyVec f (IBlock xs) = IBlock $ f xs
+  applyVec f (DBlock xs) = DBlock $ f xs
+  applyVec f (BBlock xs) = BBlock $ f xs
+  applyVec f (MBlock xs bm) = MBlock (applyVec f xs) (f bm)
+  applyVec _ x = x
+
+instance Indexable i => Apply (HDataFrame i k) where
+  mapFrac f (HDataFrame dt ix) = HDataFrame (M.map (mapFrac f) dt) ix
+  mapNum f (HDataFrame dt ix)  = HDataFrame (M.map (mapNum f) dt) ix
+  mapEq f (HDataFrame dt ix)   = HDataFrame (M.map (mapEq f) dt) ix
+  mapOrd f (HDataFrame dt ix)  = HDataFrame (M.map (mapOrd f) dt) ix
+
+  foldNum f (HDataFrame dt _) = HDataFrame (M.map (foldNum f) dt) (V.singleton def)
+
+  applyVec f (HDataFrame dt ix)  = HDataFrame (M.map (applyVec f) dt) (f ix)
+
+-------------------------------------------------------------------------------
+-- Block Structure
+-------------------------------------------------------------------------------
+
+class Default a where
+  def :: a
+
+instance Default Int where
+  def = 0
+
+instance Default Bool where
+  def = False
+
+instance Default Double where
+  def = 0.0
+
+instance Default Float where
+  def = 0.0
+
+instance Default Text where
+  def = pack ""
+
+blen :: Block -> Int
+blen (IBlock xs) = V.length xs
+blen (DBlock xs) = V.length xs
+blen (BBlock xs) = V.length xs
+blen (SBlock xs) = VB.length xs
+blen (MBlock _ bm) = V.length bm
+
+-------------------------------------------------------------------------------
+-- Automatic Alignment
+-------------------------------------------------------------------------------
+
+class Paddable a where
+  pad :: Int -> a -> a
+
+instance (Default a, V.Unbox a) => Paddable (V.Vector a) where
+  pad 0 xs = xs
+  pad n xs | n > m = xs V.++ V.replicate (n - m) def
+           | otherwise = xs
+    where m = V.length xs
+
+instance (Default a) => Paddable (VB.Vector a) where
+  pad 0 xs = xs
+  pad n xs = xs VB.++ VB.replicate (n - m) def
+    where m = VB.length xs
+
+instance Paddable Block where
+  pad n (IBlock x) = IBlock $ pad n x
+  pad n (BBlock x) = BBlock $ pad n x
+  pad n (DBlock x) = DBlock $ pad n x
+  pad n (SBlock x) = SBlock $ pad n x
+  pad n (MBlock x bm) = MBlock (pad n x) (pad n bm)
+
+alignVecs :: [Block] -> [Block]
+alignVecs xs = L.map (pad mlen) xs
+  where mlen = maximum $ L.map blen xs
+
+-- XXX probably a better way to do this
+alignMaps :: (Hashable k, Eq k) => M.HashMap k Block -> M.HashMap k Block
+alignMaps = M.fromList . alignCols.  M.toList
+
+alignCols :: [(k, Block)] -> [(k, Block)]
 alignCols xs = zip a (alignVecs b)
   where (a, b) = unzip xs
 
-alignMaps :: (Eq k, Hashable k) => M.HashMap k (V.Vector Val) -> M.HashMap k (V.Vector Val)
-alignMaps dt = M.fromList $ alignCols (M.toList dt)
+-- Pad the index with neutral elements, shouldn't really be used.
+alignIndex :: (Default i, Indexable i) => Index i -> Int -> Index i
+alignIndex ix n = pad (n - V.length ix) ix
 
 -------------------------------------------------------------------------------
 -- Indexing
 -------------------------------------------------------------------------------
 
 -- Select column.
-(!) :: (Eq k, Hashable k) => HDataFrame i k -> k -> Maybe (HDataFrame i k)
-(HDataFrame dt ix) ! k = case M.lookup k dt of
-  Just v -> Just $ HDataFrame (M.singleton k v) ix
-  Nothing -> Nothing
+(!) :: (Columnable k, Indexable i) => HDataFrame i k -> k -> (HDataFrame i k)
+(HDataFrame dt ix) ! k =
+  case M.lookup k dt of
+    Just v -> HDataFrame (M.singleton k v) ix
+    Nothing -> error $ "no such column: " ++ (show k)
+
 
 -- Select row by label.
-iloc :: Eq i => HDataFrame i k -> i -> Maybe (HDataFrame i k)
+iloc :: (Indexable i) => HDataFrame i k -> i -> (HDataFrame i k)
 iloc (HDataFrame dt ix) i =
   case V.elemIndex i ix of
-    Just i' -> Just $ HDataFrame (M.map (\x -> V.singleton (x V.! i')) dt) (V.singleton i)
-    Nothing -> Nothing
+    Just i' -> HDataFrame (M.map (ixblock i') dt) (V.singleton i)
+    Nothing -> error $ "no such row: " ++ (show i)
 
-take :: Int -> HDataFrame i k -> HDataFrame i k
-take n (HDataFrame dt ix) = HDataFrame (M.map (V.take n) dt) (V.take n ix)
+  where
+    ixblock :: Apply a => Int -> a -> a
+    ixblock j = applyVec (V.singleton . (V.! j))
 
-drop :: Int -> HDataFrame i k -> HDataFrame i k
-drop n (HDataFrame dt ix) = HDataFrame (M.map (V.drop n) dt) (V.drop n ix)
+nrows :: HDataFrame i k -> Int
+nrows (HDataFrame dt _) = blen $ snd $ head (M.toList dt)
 
-slice :: Int -> Int -> HDataFrame i k -> HDataFrame i k
-slice i j (HDataFrame dt ix) = HDataFrame (M.map (V.slice i j) dt) (V.slice i j ix)
-  {-where-}
-    {-lslice start end = L.take (end - start + 1) . L.drop start-}
+ncols :: HDataFrame i k -> Int
+ncols (HDataFrame dt _) = M.size dt
+
+-------------------------------------------------------------------------------
+-- Selection
+-------------------------------------------------------------------------------
+
+take :: Indexable i => Int -> HDataFrame i k -> HDataFrame i k
+take n = applyVec (V.take n)
+
+drop :: Indexable i => Int -> HDataFrame i k -> HDataFrame i k
+drop n = applyVec (V.drop n)
+
+slice :: Indexable i => Int -> Int -> HDataFrame i k -> HDataFrame i k
+slice i j = applyVec (V.slice i j)
+
+filter :: Indexable i => (forall a. V.Unbox a => a -> Bool) -> HDataFrame i k -> HDataFrame i k
+filter p = applyVec (V.filter p)
 
 -- Filter rows by predicate on label.
-ifilter :: (i -> Bool) -> HDataFrame i k -> HDataFrame i k
-ifilter p df@(HDataFrame _ ix) = transform f g df
+ifilter :: Indexable i => (i -> Bool) -> HDataFrame i k -> HDataFrame i k
+ifilter p df@(HDataFrame dt ix) = applyVec f df
   where
     -- find labels locations matching predicate
+    torm :: S.HashSet Int
     torm = S.fromList $ V.toList $ V.findIndices p ix
 
     -- Filter the rows on the label locations
-    f _ elts = pure $ V.ifilter (\i _ -> (i `S.member` torm)) elts
+    f = V.ifilter (\i _ -> (i `S.member` torm))
     g = V.filter p
 
--- Select rows by a list of labels.
-ifilters :: (Eq i, Hashable i) => HDataFrame i k -> [i] -> HDataFrame i k
-ifilters df@(HDataFrame _ ix) is = transform f g df
+-- XXX: don't want Hashable constraint
+ifilters :: (Indexable i, Hashable i) => [i] -> HDataFrame i k -> HDataFrame i k
+ifilters is df@(HDataFrame dt ix) = applyVec f df
   where
+    -- find labels locations matching predicate
     is' = S.fromList is
     torm = S.fromList $ L.findIndices (\x -> x `S.member` is') (V.toList ix)
 
     -- Filter the rows on the label locations
-    f _ elts = pure $ V.ifilter (\i _ -> (i `S.member` torm)) elts
-    g = V.filter (\x -> x `S.member` is')
+    f = V.ifilter (\i _ -> (i `S.member` torm))
 
 -- Filter by predicate on column.
-filter :: (k -> Bool) -> HDataFrame i k -> HDataFrame i k
-filter p (HDataFrame dt ix) = HDataFrame (M.filterWithKey (\k _ -> p k) dt) ix
+filterCol :: (k -> Bool) -> HDataFrame i k -> HDataFrame i k
+filterCol p (HDataFrame dt ix) = HDataFrame (M.filterWithKey (\k _ -> p k) dt) ix
 
 -- Horizontal concatentation of frames.
 hcat :: (Eq i, Eq k, Hashable k) => HDataFrame i k -> HDataFrame i k -> HDataFrame i k
 hcat (HDataFrame dt ix) (HDataFrame dt' ix') = HDataFrame (alignMaps $ M.union dt dt') ix
 
--- Map function across a single column.
-map :: Eq k => (Val -> Val) -> k -> HDataFrame i k -> HDataFrame i k
-map f k dt = transform fn id dt
-  where
-    fn k' elts | k' == k   = pure $ V.map f elts
-               | otherwise = pure $ elts
+sum :: (Indexable i, Columnable k) => HDataFrame i k -> HDataFrame i k
+sum = foldNum (+)
 
--- Left fold function across a single column.
-fold :: (Ord i, Ord k, Hashable k)
-      => (Val -> Val -> Val)
-      -> k
-      -> HDataFrame i k
-      -> HDataFrame i k
-fold f k (HDataFrame dt ix) = fromMap [(k, [V.foldl1' f (dt M.! k)])] []
+mean :: (Indexable i, Columnable k) => HDataFrame i k -> HDataFrame i k
+mean df = mapFrac (/m) $ foldNum (+) df
+  where m = fromIntegral $ nrows df
 
--- Fold all columns.
-foldAll :: (Ord i, Ord k, Hashable k)
-      => (Val -> Val -> Val)
-      -> HDataFrame i k
-      -> HDataFrame i k
-foldAll f (HDataFrame dt ix) = HDataFrame (M.map fn dt) V.empty
-  where
-    fn xs = V.singleton $ V.foldl1' f xs
+sumCol :: (Indexable i, Columnable k) => HDataFrame i k -> k -> HDataFrame i k
+sumCol df k = foldNum (+) (df ! k)
 
--- Sum a single column.
-sum :: (Ord i, Ord k, Hashable k) => k -> HDataFrame i k -> HDataFrame i k
-sum k = fold (+) k
-
-mean :: (Ord i, Ord k, Hashable k) => k -> HDataFrame i k -> HDataFrame i k
-mean k (HDataFrame dt ix) = singleton k $ [m / (sim m n)]
-  where
-    m = V.foldl1' (+) v
-    n = V.length v
-    v = dt M.! k
-
-dropna :: (Ord i, Ord k, Hashable k) => k -> HDataFrame i k -> HDataFrame i k
-dropna = undefined
+meanCol :: (Indexable i, Columnable k) => HDataFrame i k -> k -> HDataFrame i k
+meanCol df k = mapFrac (/m) $ sumCol df k
+  where m = fromIntegral $ nrows df
