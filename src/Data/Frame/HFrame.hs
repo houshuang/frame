@@ -255,13 +255,13 @@ instance Apply Block where
 
   mapEq f (DBlock xs) = DBlock $ V.map f xs
   mapEq f (MBlock (DBlock xs) bm) = MBlock (DBlock $ mapMask f xs bm) bm
-  mapEq f (MBlock (IBlock xs) bm) = MBlock (IBlock $ mapMask (castDoubleTransform f) xs bm) bm
+  mapEq f (MBlock (IBlock xs) bm) = MBlock (IBlock $ mapMask f xs bm) bm
   mapEq f (IBlock xs) = IBlock $ V.map (castDoubleTransform f) xs
   mapEq _ x = x
 
   mapOrd f (DBlock xs) = DBlock $ V.map f xs
   mapOrd f (MBlock (DBlock xs) bm) = MBlock (DBlock $ mapMask f xs bm) bm
-  mapOrd f (MBlock (IBlock xs) bm) = MBlock (IBlock $ mapMask (castDoubleTransform f) xs bm) bm
+  mapOrd f (MBlock (IBlock xs) bm) = MBlock (IBlock $ mapMask f xs bm) bm
   mapOrd f (IBlock xs) = IBlock $ V.map (castDoubleTransform f) xs
   mapOrd _ x = x
 
