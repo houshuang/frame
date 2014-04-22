@@ -323,7 +323,6 @@ class Paddable a where
   pad :: Int -> a -> a
 
 instance (Default a, V.Unbox a) => Paddable (V.Vector a) where
-  pad 0 xs = xs
   pad n xs | n > m = xs V.++ V.replicate (n - m) def
            | otherwise = xs
     where m = V.length xs
