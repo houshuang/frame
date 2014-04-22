@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Data.Frame.HFrame (
   HDataFrame,
@@ -45,36 +46,45 @@ module Data.Frame.HFrame (
 
   hcat,
 
-  sum,
+  Data.Frame.HFrame.sum,
   sumCol,
 
   mean,
-  meanCol
+  meanCol,
+
+  _DBlock,
+  _IBlock,
+  _BBlock,
+  _MBlock,
+  _SBlock
 
 ) where
 
-import Prelude hiding (take, drop, filter, sum)
+import Prelude hiding (take, drop, filter, sum, maximum, map)
 
 import Data.Frame.Pretty
 
 import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Algorithms.Merge as VS
+import Data.Foldable as F
+import Data.Traversable as F
 
-import qualified Data.HashMap.Strict as M
-import qualified Data.HashSet as S
 import qualified Data.List as L
+import qualified Data.HashSet as S
+import qualified Data.HashMap.Strict as M
 
 import Data.Data
-{-import Data.DateTime-}
 import Data.Typeable
 import Data.Hashable (Hashable(..))
+{-import Data.DateTime-}
 
 import Text.PrettyPrint hiding (hcat)
 import Data.Text (Text, pack, unpack)
 import qualified GHC.Float as GHC
 
 import qualified Text.PrettyPrint.Boxes as PB
+import Control.Lens (makeLenses, makePrisms)
 
 type Index i = V.Vector i
 
@@ -103,11 +113,12 @@ data Block
   | IBlock !(V.Vector Int)
   | BBlock !(V.Vector Bool)
   | MBlock {
-     mdata  :: !Block
-   , bitmap :: !(V.Vector Bool)
+     _mdata  :: !Block
+   , _bitmap :: !(V.Vector Bool)
    }
   | SBlock !(VB.Vector Text)
   deriving (Eq, Show, Data, Typeable)
+
 
 bblock :: [Bool] -> Block
 bblock = BBlock . V.fromList
@@ -128,7 +139,7 @@ mblock dat@(BBlock _) mask = MBlock dat (V.fromList mask)
 mblock _ _ = error "unsupported masked block"
 
 schema :: HDataFrame t k -> [(k, String)]
-schema (HDataFrame dt _) = L.map (fmap $ show . toConstr) (M.toList dt)
+schema (HDataFrame dt _) = fmap (fmap $ show . toConstr) (M.toList dt)
 
 -------------------------------------------------------------------------------
 -- Constructors
@@ -154,7 +165,7 @@ fromBlocks xs cols = HDataFrame (M.fromList $ zip cols xs) df_ix
   where
     df_ix = V.enumFromTo 0 (fromIntegral nrows)
     ncols = length xs
-    nrows = maximum (map blen xs)
+    nrows = maximum $ fmap blen xs
 
 -- | Construct a dataframe from a singular index, key and block.
 column :: Columnable k => k -> V.Vector i -> Block -> HDataFrame i k
@@ -169,28 +180,28 @@ row = undefined
 -------------------------------------------------------------------------------
 
 unText :: [Text] -> [String]
-unText = L.map unpack
+unText = fmap unpack
 
 showHDataFrame :: (Pretty i, Pretty k, V.Unbox i) => HDataFrame i k -> String
 showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ body
   where
     index = pix (V.toList ix) -- show index
-    cols = (L.map pcols $ showBlocks (M.toList dt)) -- show cols
+    cols = (fmap pcols $ showBlocks (M.toList dt)) -- show cols
     body = index : cols
 
     pcols (a, xs) = PB.vcat PB.left $ col ++ vals
       where
         col = [ppb a]
-        vals = L.map ppb xs
+        vals = fmap ppb xs
 
-    pix xs = PB.vcat PB.left (L.map ppb xs)
+    pix xs = PB.vcat PB.left (fmap ppb xs)
 
 showBlocks ::  [(a, Block)] -> [(a, [String])]
-showBlocks = L.map (fmap showBlock)
+showBlocks = fmap (fmap showBlock)
   where
-    showBlock (IBlock xs) = L.map show $ V.toList xs
-    showBlock (DBlock xs) = L.map show $ V.toList xs
-    showBlock (BBlock xs) = L.map show $ V.toList xs
+    showBlock (IBlock xs) = fmap show $ V.toList xs
+    showBlock (DBlock xs) = fmap show $ V.toList xs
+    showBlock (BBlock xs) = fmap show $ V.toList xs
     showBlock (SBlock xs) = unText (VB.toList xs)
     showBlock (MBlock xs bm) = zipWith unpackMissing (showBlock xs) (V.toList bm)
       where
@@ -226,6 +237,8 @@ transformKeys f (HDataFrame dt ix) = HDataFrame dt' ix
 -- Apply a function over an unparameterized type, we can't implement Functor because of the heteregenous
 -- typing of the block structure so this just reaches inside and applies regardless of what the underlying
 -- structure of the block is, V.Vector, VB.Vector, List, etc...
+--
+-- XXX: Constraint kinds?
 class Apply f where
   mapNum  :: (forall t. Num t => t -> t) -> f -> f
   mapFrac :: (forall t. Fractional t => t -> t) -> f -> f
@@ -340,8 +353,8 @@ instance Paddable Block where
   pad n (MBlock x bm) = MBlock (pad n x) (pad n bm)
 
 alignVecs :: [Block] -> [Block]
-alignVecs xs = L.map (pad mlen) xs
-  where mlen = maximum $ L.map blen xs
+alignVecs xs = fmap (pad mlen) xs
+  where mlen = maximum $ fmap blen xs
 
 -- XXX probably a better way to do this
 alignMaps :: (Hashable k, Eq k) => M.HashMap k Block -> M.HashMap k Block
@@ -444,3 +457,7 @@ sumCol df k = foldNum (+) (df ! k)
 meanCol :: (Indexable i, Columnable k) => HDataFrame i k -> k -> HDataFrame i k
 meanCol df k = mapFrac (/m) $ sumCol df k
   where m = fromIntegral $ nrows df
+
+makeLenses ''HDataFrame
+makeLenses ''Block
+makePrisms ''Block

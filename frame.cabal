@@ -16,6 +16,7 @@ Source-Repository head
 
 library
   exposed-modules:
+    Data.Frame
     Data.Frame.HFrame
     Data.Frame.Pretty
     Data.Frame.CSV
