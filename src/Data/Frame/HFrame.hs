@@ -6,6 +6,10 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE KindSignatures #-}
+
+{-# OPTIONS_GHC -fno-warn-incomplete-uni-patterns #-}
 
 module Data.Frame.HFrame (
   HDataFrame(..),
@@ -23,6 +27,8 @@ module Data.Frame.HFrame (
   mblock,
   sblock,
   blen,
+  FromBlock(..),
+  Result(..),
 
   schema,
 
@@ -32,11 +38,13 @@ module Data.Frame.HFrame (
 
   (!),
   iloc,
-  take,
-  drop,
-  slice,
 
-  filter,
+  Data.Frame.HFrame.take,
+  Data.Frame.HFrame.drop,
+  Data.Frame.HFrame.filter,
+  Data.Frame.HFrame.sum,
+
+  slice,
   ifilter,
   ifilters,
 
@@ -46,12 +54,12 @@ module Data.Frame.HFrame (
 
   hcat,
 
-  Data.Frame.HFrame.sum,
   sumCol,
 
   mean,
   meanCol,
 
+  -- ** Prisms
   _DBlock,
   _IBlock,
   _BBlock,
@@ -60,7 +68,14 @@ module Data.Frame.HFrame (
 
 ) where
 
-import Prelude hiding (take, drop, filter, sum, maximum, map)
+import  Data.List hiding (
+    all , and , any , concat , concatMap , elem , filter ,
+    find , foldl , foldl' , foldl1 , foldr , foldr1 ,
+    mapAccumL , mapAccumR , maximum , maximumBy , minimum ,
+    minimumBy , notElem , or , product , sum )
+
+import Control.Monad hiding (
+    forM , forM_ , mapM , mapM_ , msum , sequence , sequence_ )
 
 import Data.Frame.Pretty
 
@@ -75,17 +90,24 @@ import qualified Data.HashSet as S
 import qualified Data.HashMap.Strict as M
 
 import Data.Data
+import Data.Maybe
 import Data.Monoid
 import Data.Typeable
-import Data.Hashable (Hashable(..))
+import Control.DeepSeq (NFData(..))
 {-import Data.DateTime-}
+import Data.Hashable (Hashable(..))
 
 import Text.PrettyPrint hiding (hcat)
 import Data.Text (Text, pack, unpack)
 import qualified GHC.Float as GHC
 
+import Control.Applicative
 import qualified Text.PrettyPrint.Boxes as PB
 import Control.Lens (makeLenses, makePrisms)
+
+-------------------------------------------------------------------------------
+-- Indexes and Columns
+-------------------------------------------------------------------------------
 
 type Index i = V.Vector i
 
@@ -103,11 +125,19 @@ instance Indexable Float
 instance Indexable Bool
 {-instance Indexable DateTime-}
 
+-------------------------------------------------------------------------------
+-- Frame
+-------------------------------------------------------------------------------
+
 -- The heterogeneously typed dataframe.
 data HDataFrame i k = HDataFrame
   { _hdfdata :: !(M.HashMap k Block)
   , _hdfindex :: !(Index i)
   } deriving (Eq)
+
+-------------------------------------------------------------------------------
+-- Blocks
+-------------------------------------------------------------------------------
 
 data Block
   = DBlock !(V.Vector Double)
@@ -118,7 +148,9 @@ data Block
    , _bitmap :: !(V.Vector Bool)
    }
   | SBlock !(VB.Vector Text)
+  | NBlock
   deriving (Eq, Show, Data, Typeable)
+
 
 bblock :: [Bool] -> Block
 bblock = BBlock . V.fromList
@@ -138,8 +170,201 @@ mblock dat@(IBlock _) mask = MBlock dat (V.fromList mask)
 mblock dat@(BBlock _) mask = MBlock dat (V.fromList mask)
 mblock _ _ = error "unsupported masked block"
 
+blen :: Block -> Int
+blen (IBlock xs) = V.length xs
+blen (DBlock xs) = V.length xs
+blen (BBlock xs) = V.length xs
+blen (SBlock xs) = VB.length xs
+blen (MBlock _ bm) = V.length bm
+
+
+-------------------------------------------------------------------------------
+-- Result
+-------------------------------------------------------------------------------
+
+data Result a = Error String
+              | Success a
+                deriving (Eq, Show, Typeable)
+
+instance (NFData a) => NFData (Result a) where
+    rnf (Success a) = rnf a
+    rnf (Error err) = rnf err
+
+instance Functor Result where
+    fmap f (Success a) = Success (f a)
+    fmap _ (Error err) = Error err
+    {-# INLINE fmap #-}
+
+instance Monad Result where
+    return = Success
+    {-# INLINE return #-}
+    Success a >>= k = k a
+    Error err >>= _ = Error err
+    {-# INLINE (>>=) #-}
+
+instance Applicative Result where
+    pure  = return
+    {-# INLINE pure #-}
+    (<*>) = ap
+    {-# INLINE (<*>) #-}
+
+instance MonadPlus Result where
+    mzero = fail "mzero"
+    {-# INLINE mzero #-}
+    mplus a@(Success _) _ = a
+    mplus _ b             = b
+    {-# INLINE mplus #-}
+
+instance Monoid (Result a) where
+    mempty  = fail "mempty"
+    {-# INLINE mempty #-}
+    mappend = mplus
+    {-# INLINE mappend #-}
+
+instance Alternative Result where
+    empty = mzero
+    {-# INLINE empty #-}
+    (<|>) = mplus
+    {-# INLINE (<|>) #-}
+
+-------------------------------------------------------------------------------
+-- Block Typing
+-------------------------------------------------------------------------------
+
+class FromBlock a where
+  fromBlock :: Block -> Result [a]
+  toBlock :: [a] -> Block
+
+instance FromBlock Int where
+  fromBlock (IBlock xs) = Success (V.toList xs)
+  fromBlock _ = Error ""
+
+  toBlock = IBlock . V.fromList
+
+instance FromBlock Bool where
+  fromBlock (BBlock xs) = Success (V.toList xs)
+  fromBlock _ = Error ""
+
+  toBlock = BBlock . V.fromList
+
+instance FromBlock Double where
+  fromBlock (DBlock xs) = Success (V.toList xs)
+  fromBlock _ = Error ""
+
+  toBlock = DBlock . V.fromList
+
+instance (Default a, FromBlock a) => FromBlock (Maybe a) where
+  fromBlock x@(MBlock {}) = Success (unMask x)
+  fromBlock _ = Error ""
+
+  toBlock = reMask
+
+instance FromBlock () where
+  fromBlock NBlock = Success [()]
+  toBlock = const NBlock
+
+instance Monoid Block where
+  mempty = NBlock
+  mappend a NBlock = a
+  mappend NBlock a = a
+  mappend a b = a -- XXX
+
 schema :: HDataFrame t k -> [(k, String)]
 schema (HDataFrame dt _) = fmap (fmap $ show . toConstr) (M.toList dt)
+
+
+-------------------------------------------------------------------------------
+-- Padding
+-------------------------------------------------------------------------------
+
+class Default a where
+  def :: a
+
+instance Default Int where
+  def = 0
+
+instance Default Bool where
+  def = False
+
+instance Default Double where
+  def = 0.0
+
+instance Default Float where
+  def = 0.0
+
+instance Default Text where
+  def = pack ""
+
+-- Automatic Alignment
+
+class Paddable a where
+  pad :: Int -> a -> a
+
+instance (Default a, V.Unbox a) => Paddable (V.Vector a) where
+  pad n xs | n > m = xs V.++ V.replicate (n - m) def
+           | otherwise = xs
+    where m = V.length xs
+
+instance (Default a) => Paddable (VB.Vector a) where
+  pad 0 xs = xs
+  pad n xs = xs VB.++ VB.replicate (n - m) def
+    where m = VB.length xs
+
+instance Paddable Block where
+  pad n (IBlock x) = IBlock $ pad n x
+  pad n (BBlock x) = BBlock $ pad n x
+  pad n (DBlock x) = DBlock $ pad n x
+  pad n (SBlock x) = SBlock $ pad n x
+  pad n (MBlock x bm) = MBlock (pad n x) (pad n bm)
+
+alignVecs :: [Block] -> [Block]
+alignVecs xs = fmap (pad mlen) xs
+  where mlen = F.maximum $ fmap blen xs
+
+-- XXX probably a better way to do this
+alignMaps :: (Hashable k, Eq k) => M.HashMap k Block -> M.HashMap k Block
+alignMaps = M.fromList . alignCols.  M.toList
+
+alignCols :: [(k, Block)] -> [(k, Block)]
+alignCols xs = zip a (alignVecs b)
+  where (a, b) = unzip xs
+
+-- Pad the index with neutral elements, shouldn't really be used.
+alignIndex :: (Default i, Indexable i) => Index i -> Int -> Index i
+alignIndex ix n = pad (n - V.length ix) ix
+
+-------------------------------------------------------------------------------
+-- Mask
+-------------------------------------------------------------------------------
+
+-- Convert a MBlock to a list of 'Maybe a'
+unMask :: FromBlock a => Block -> [Maybe a]
+unMask (MBlock dat bm) = go dat' (V.toList bm)
+  where
+    go [] [] = []
+    go (x:xs) (True:ys)  = Nothing : go xs ys
+    go (x:xs) (False:ys) = Just x : go xs ys
+
+    -- won't compile if this isn't guaranteed
+    Success dat' = fromBlock dat
+
+-- Convert a list of 'Maybe a' to a MBlock
+reMask :: (FromBlock a, Default a) => [Maybe a] -> Block
+reMask xs = MBlock (toBlock $ map go xs) (V.fromList $ map isJust xs)
+  where
+    go (Just a) = a
+    go Nothing = def
+
+mapMask :: V.Unbox a =>
+           (a -> a) ->       -- transformation
+           V.Vector a ->     -- data
+           V.Vector Bool ->  -- mask
+           V.Vector a
+mapMask f xs ys = V.zipWith (go f) xs ys
+  where
+    go :: (a -> a) -> a -> Bool -> a
+    go f' x y | y == True = f' x
+              | otherwise = x
 
 -------------------------------------------------------------------------------
 -- Constructors
@@ -165,22 +390,15 @@ fromBlocks xs cols = HDataFrame (M.fromList $ zip cols xs) df_ix
   where
     df_ix = V.enumFromTo 0 (fromIntegral nrows)
     ncols = length xs
-    nrows = maximum $ fmap blen xs
+    nrows = F.maximum $ fmap blen xs
 
 -- | Construct a dataframe from a singular index, key and block.
 column :: Columnable k => k -> V.Vector i -> Block -> HDataFrame i k
 column k i v = HDataFrame (M.fromList $ [(k, v)]) i
 
--- | Construct a dataframe from a vector of
-row :: Indexable i => V.Vector i -> V.Vector k -> HDataFrame i k
-row = undefined
-
 -------------------------------------------------------------------------------
 -- Pretty Printing
 -------------------------------------------------------------------------------
-
-unText :: [Text] -> [String]
-unText = fmap unpack
 
 showHDataFrame :: (Pretty i, Pretty k, V.Unbox i) => HDataFrame i k -> String
 showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ body
@@ -202,7 +420,7 @@ showBlocks = fmap (fmap showBlock)
     showBlock (IBlock xs) = fmap show $ V.toList xs
     showBlock (DBlock xs) = fmap show $ V.toList xs
     showBlock (BBlock xs) = fmap show $ V.toList xs
-    showBlock (SBlock xs) = unText (VB.toList xs)
+    showBlock (SBlock xs) = fmap unpack $ VB.toList xs
     showBlock (MBlock xs bm) = zipWith unpackMissing (showBlock xs) (V.toList bm)
       where
         unpackMissing a True = a
@@ -211,13 +429,6 @@ showBlocks = fmap (fmap showBlock)
 -------------------------------------------------------------------------------
 -- Deconstructors
 -------------------------------------------------------------------------------
-
-mapMask :: (V.Unbox a) => (a -> a) -> V.Vector a -> V.Vector Bool -> V.Vector a
-mapMask f xs ys = V.zipWith (go f) xs ys
-  where
-    go :: (a -> a) -> a -> Bool -> a
-    go f' x y | y == True = f' x
-              | otherwise = x
 
 -- hack to allow us to apply Fractional functions over Integral columsn, unsafe with respect to
 -- overflow/underflow
@@ -298,75 +509,6 @@ instance Indexable i => Apply (HDataFrame i k) where
   foldNum f (HDataFrame dt _) = HDataFrame (M.map (foldNum f) dt) (V.singleton def)
 
   applyVec f (HDataFrame dt ix)  = HDataFrame (M.map (applyVec f) dt) (f ix)
-
--------------------------------------------------------------------------------
--- Block Structure
--------------------------------------------------------------------------------
-
-class Default a where
-  def :: a
-
-instance Default Int where
-  def = 0
-
-instance Default Bool where
-  def = False
-
-instance Default Double where
-  def = 0.0
-
-instance Default Float where
-  def = 0.0
-
-instance Default Text where
-  def = pack ""
-
-blen :: Block -> Int
-blen (IBlock xs) = V.length xs
-blen (DBlock xs) = V.length xs
-blen (BBlock xs) = V.length xs
-blen (SBlock xs) = VB.length xs
-blen (MBlock _ bm) = V.length bm
-
--------------------------------------------------------------------------------
--- Automatic Alignment
--------------------------------------------------------------------------------
-
-class Paddable a where
-  pad :: Int -> a -> a
-
-instance (Default a, V.Unbox a) => Paddable (V.Vector a) where
-  pad n xs | n > m = xs V.++ V.replicate (n - m) def
-           | otherwise = xs
-    where m = V.length xs
-
-instance (Default a) => Paddable (VB.Vector a) where
-  pad 0 xs = xs
-  pad n xs = xs VB.++ VB.replicate (n - m) def
-    where m = VB.length xs
-
-instance Paddable Block where
-  pad n (IBlock x) = IBlock $ pad n x
-  pad n (BBlock x) = BBlock $ pad n x
-  pad n (DBlock x) = DBlock $ pad n x
-  pad n (SBlock x) = SBlock $ pad n x
-  pad n (MBlock x bm) = MBlock (pad n x) (pad n bm)
-
-alignVecs :: [Block] -> [Block]
-alignVecs xs = fmap (pad mlen) xs
-  where mlen = maximum $ fmap blen xs
-
--- XXX probably a better way to do this
-alignMaps :: (Hashable k, Eq k) => M.HashMap k Block -> M.HashMap k Block
-alignMaps = M.fromList . alignCols.  M.toList
-
-alignCols :: [(k, Block)] -> [(k, Block)]
-alignCols xs = zip a (alignVecs b)
-  where (a, b) = unzip xs
-
--- Pad the index with neutral elements, shouldn't really be used.
-alignIndex :: (Default i, Indexable i) => Index i -> Int -> Index i
-alignIndex ix n = pad (n - V.length ix) ix
 
 -------------------------------------------------------------------------------
 -- Indexing
