@@ -29,4 +29,7 @@ instance (Ord a, Hashable a) => At (HDataFrame k a) where
     Just v' -> HDataFrame (M.insert k v' m) ix
     where mv = M.lookup k m
 
+-- Select column.
 col k = at k._Just.to(fromBlock)
+
+df ! k = df ^. col k
