@@ -3,3 +3,4 @@ module Data.Frame (
 ) where
 
 import Data.Frame.HFrame
+import Data.Frame.Instances

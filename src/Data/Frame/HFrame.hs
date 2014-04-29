@@ -8,7 +8,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Data.Frame.HFrame (
-  HDataFrame,
+  HDataFrame(..),
   showHDataFrame,
 
   nrows,
@@ -75,6 +75,7 @@ import qualified Data.HashSet as S
 import qualified Data.HashMap.Strict as M
 
 import Data.Data
+import Data.Monoid
 import Data.Typeable
 import Data.Hashable (Hashable(..))
 {-import Data.DateTime-}
@@ -118,7 +119,6 @@ data Block
    }
   | SBlock !(VB.Vector Text)
   deriving (Eq, Show, Data, Typeable)
-
 
 bblock :: [Bool] -> Block
 bblock = BBlock . V.fromList
@@ -378,7 +378,6 @@ alignIndex ix n = pad (n - V.length ix) ix
   case M.lookup k dt of
     Just v -> HDataFrame (M.singleton k v) ix
     Nothing -> error $ "no such column: " ++ (show k)
-
 
 -- Select row by label.
 iloc :: (Indexable i) => HDataFrame i k -> i -> (HDataFrame i k)
