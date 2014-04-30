@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Frame.Internal (
   HDataFrame(..),
@@ -156,7 +157,7 @@ blockType (DBlock a) = typeOf (0.0 :: Double)
 blockType (IBlock a) = typeOf (1 :: Int)
 blockType (BBlock a) = typeOf False
 blockType (SBlock a) = typeOf (Data.Text.empty)
-blockType (MBlock a _) = typeOf a -- XXX
+blockType (MBlock a _) = mkTyConApp (mkTyCon "Maybe") [blockType a]
 blockType NBlock = typeOf ()
 
 -------------------------------------------------------------------------------

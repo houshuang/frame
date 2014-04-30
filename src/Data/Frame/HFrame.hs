@@ -118,6 +118,8 @@ mblock :: Block -> [Bool] -> Block
 mblock dat@(DBlock _) mask = MBlock dat (V.fromList mask)
 mblock dat@(IBlock _) mask = MBlock dat (V.fromList mask)
 mblock dat@(BBlock _) mask = MBlock dat (V.fromList mask)
+mblock dat@(SBlock _) mask = MBlock dat (V.fromList mask)
+mblock (MBlock dat _) mask = MBlock dat (V.fromList mask)
 mblock _ _ = error "unsupported masked block"
 
 blen :: Block -> Int
@@ -125,7 +127,7 @@ blen (IBlock xs) = V.length xs
 blen (DBlock xs) = V.length xs
 blen (BBlock xs) = V.length xs
 blen (SBlock xs) = VB.length xs
-blen (MBlock _ bm) = V.length bm
+blen (MBlock xs _) = blen xs
 
 -------------------------------------------------------------------------------
 -- Block Typing
@@ -137,38 +139,40 @@ class FromBlock a where
 
 instance FromBlock Int where
   fromBlock (IBlock xs) = Success (V.toList xs)
-  fromBlock x = Error $ "Expected Int but got " ++ (show $ blockType x)
+  fromBlock x = Error $ "Expected 'Int' but got '" ++ (show $ blockType x) ++ "'"
 
   toBlock = IBlock . V.fromList
 
 instance FromBlock Bool where
   fromBlock (BBlock xs) = Success (V.toList xs)
-  fromBlock x = Error $ "Expected Bool but got " ++ (show $ blockType x)
+  fromBlock x = Error $ "Expected 'Bool' but got '" ++ (show $ blockType x) ++ "'"
 
   toBlock = BBlock . V.fromList
 
 instance FromBlock Double where
   fromBlock (DBlock xs) = Success (V.toList xs)
-  fromBlock x = Error $ "Expected Double but got " ++ (show $ blockType x)
+  fromBlock x = Error $ "Expected 'Double' but got '" ++ (show $ blockType x) ++ "'"
 
   toBlock = DBlock . V.fromList
 
 instance FromBlock Text where
   fromBlock (SBlock xs) = Success (VB.toList xs)
-  fromBlock x = Error $ "Expected Text but got " ++ (show $ blockType x)
+  fromBlock x = Error $ "Expected 'Text' but got '" ++ (show $ blockType x) ++ "'"
 
   toBlock = SBlock . VB.fromList
 
 instance (Default a, FromBlock a, Typeable a) => FromBlock (Maybe a) where
   fromBlock x@(MBlock {}) = unMask x
-  fromBlock x = Error $ "Expected (Maybe " ++ ty ++ ") but got " ++ (show $ blockType x)
-    where ty = show (typeOf (undefined :: a)) -- XXX blech
+  fromBlock x = Error $ "Expected '" ++ show ty ++ "' but got '" ++ (show $ blockType x) ++ "'"
+    where ty = typeOf (undefined :: Maybe a) -- XXX blech
 
   toBlock = reMask
 
 instance FromBlock () where
   fromBlock NBlock = Success [()]
+  fromBlock x = Error $ "Expected '()' but got '" ++ (show $ blockType x) ++ "'"
   toBlock = const NBlock
+
 
 instance Monoid Block where
   mempty = NBlock
@@ -341,7 +345,7 @@ transformKeys f (HDataFrame dt ix) = HDataFrame dt' ix
 --
 -- XXX: Constraint kinds?
 class Apply f where
-  mapGen  :: (c) => t -> t -> f -> f
+  -- mapGen  :: (c) => t -> t -> f -> f
 
   mapNum  :: (forall t. Num t => t -> t) -> f -> f
   mapFrac :: (forall t. Fractional t => t -> t) -> f -> f
