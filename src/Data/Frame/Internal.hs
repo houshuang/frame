@@ -13,7 +13,7 @@ module Data.Frame.Internal (
   Block(..),
   Index,
 
-  Columnable(..),
+  Columnable,
   Indexable(..),
   Default(..),
   Result(..),
@@ -40,14 +40,12 @@ import qualified Data.Vector.Unboxed as V
 import qualified Data.HashMap.Strict as M
 
 import Data.Data
-import Data.Maybe
 import Data.Monoid
-import Data.Typeable
 import Control.DeepSeq (NFData(..))
 import Data.DateTime
 import Data.Hashable (Hashable(..))
 
-import Data.Text (Text, pack, unpack, empty)
+import Data.Text (Text, pack, empty)
 
 import Control.Monad
 import Control.Applicative
@@ -104,7 +102,7 @@ instance Indexable DateTime where
 
 -- The heterogeneously typed dataframe.
 data HDataFrame i k = HDataFrame
-  { _hdfdata :: !(M.HashMap k Block)
+  { _hdfdata  :: !(M.HashMap k Block)
   , _hdfindex :: !(Index i)
   } deriving (Eq)
 
@@ -153,10 +151,10 @@ instance Default (Maybe a) where
 -------------------------------------------------------------------------------
 
 blockType :: Block -> TypeRep
-blockType (DBlock a) = typeOf (0.0 :: Double)
-blockType (IBlock a) = typeOf (1 :: Int)
-blockType (BBlock a) = typeOf False
-blockType (SBlock a) = typeOf (Data.Text.empty)
+blockType (DBlock _) = typeOf (0.0 :: Double)
+blockType (IBlock _) = typeOf (1 :: Int)
+blockType (BBlock _) = typeOf False
+blockType (SBlock _) = typeOf (Data.Text.empty)
 blockType (MBlock a _) = mkTyConApp (mkTyCon "Maybe") [blockType a]
 blockType NBlock = typeOf ()
 
@@ -211,5 +209,4 @@ instance Alternative Result where
   {-# INLINE (<|>) #-}
 
 makeLenses ''HDataFrame
-makeLenses ''Block
 makePrisms ''Block

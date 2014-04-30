@@ -1,23 +1,28 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 
+module Data.Frame.Instances (
+  col,
+  (!),
 
-module Data.Frame.Instances where
+  blocks,
+  index
+) where
 
 import Data.Frame.HFrame
+import Data.Frame.Internal (Columnable, hdfdata, hdfindex)
+import qualified Data.Frame.Internal as I
+
+import Data.Hashable (Hashable(..))
 import qualified Data.HashMap.Strict as M
 
 import Control.Applicative
-
-import Data.Hashable (Hashable(..))
-import Control.Lens ((&), (^.), (^?), (.~), at, (<&>), _Just, to)
-import Control.Lens.At
-
--- f (Seq.index m i) <&> \a -> Seq.update i a m
--- fmap (\a -> Seq update i am) (f (Seq.index m i))
+import Control.Lens ((&), (^.), (^?), (.~), at, (<&>), _Just, to, over, traverse, (%~))
+import Control.Lens (Index, IxValue, Ixed(..), At(..))
 
 type instance IxValue (HDataFrame k a) = Block
 type instance Index (HDataFrame k a) = a
+
 instance (Eq a, Hashable a) => Ixed (HDataFrame k a) where
   ix k f (HDataFrame m ix) = case M.lookup k m of
      Just v  -> fmap (\v' -> HDataFrame (M.insert k v' m) ix) (f v)
@@ -29,7 +34,21 @@ instance (Ord a, Hashable a) => At (HDataFrame k a) where
     Just v' -> HDataFrame (M.insert k v' m) ix
     where mv = M.lookup k m
 
--- Select column.
+-------------------------------------------------------------------------------
+-- Lens Getters
+-------------------------------------------------------------------------------
+
+-- | View a column.
 col k = at k._Just.to(fromBlock)
 
+-- | Select a column.
+(!) :: (Columnable a, Ord a, FromBlock b) => HDataFrame k a -> a -> Result [b]
 df ! k = df ^. col k
+
+-- | Alter the block structure
+blocks :: (Block -> Block) -> HDataFrame a k -> HDataFrame a k
+blocks f df = df & hdfdata.traverse %~ f
+
+-- | Alter the index
+index :: (I.Index a -> I.Index b) -> HDataFrame a k -> HDataFrame b k
+index f df = df & hdfindex %~ f
