@@ -17,6 +17,8 @@ module Data.Frame.Internal (
   Default(..),
   Result(..),
 
+  blockType,
+
   -- ** Lenses
   hdfdata,
   hdfindex,
@@ -44,7 +46,7 @@ import Control.DeepSeq (NFData(..))
 import Data.DateTime
 import Data.Hashable (Hashable(..))
 
-import Data.Text (Text, pack, unpack)
+import Data.Text (Text, pack, unpack, empty)
 
 import Control.Monad
 import Control.Applicative
@@ -142,6 +144,20 @@ instance Default Text where
 instance Default DateTime where
   def = startOfTime
 
+instance Default (Maybe a) where
+  def = Nothing
+
+-------------------------------------------------------------------------------
+-- Block Type
+-------------------------------------------------------------------------------
+
+blockType :: Block -> TypeRep
+blockType (DBlock a) = typeOf (0.0 :: Double)
+blockType (IBlock a) = typeOf (1 :: Int)
+blockType (BBlock a) = typeOf False
+blockType (SBlock a) = typeOf (Data.Text.empty)
+blockType (MBlock a _) = typeOf a -- XXX
+blockType NBlock = typeOf ()
 
 -------------------------------------------------------------------------------
 -- Result

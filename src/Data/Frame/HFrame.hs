@@ -7,7 +7,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Frame.HFrame (
   HDataFrame(..),
@@ -137,25 +137,32 @@ class FromBlock a where
 
 instance FromBlock Int where
   fromBlock (IBlock xs) = Success (V.toList xs)
-  fromBlock _ = Error ""
+  fromBlock x = Error $ "Expected Int but got " ++ (show $ blockType x)
 
   toBlock = IBlock . V.fromList
 
 instance FromBlock Bool where
   fromBlock (BBlock xs) = Success (V.toList xs)
-  fromBlock _ = Error ""
+  fromBlock x = Error $ "Expected Bool but got " ++ (show $ blockType x)
 
   toBlock = BBlock . V.fromList
 
 instance FromBlock Double where
   fromBlock (DBlock xs) = Success (V.toList xs)
-  fromBlock _ = Error ""
+  fromBlock x = Error $ "Expected Double but got " ++ (show $ blockType x)
 
   toBlock = DBlock . V.fromList
 
-instance (Default a, FromBlock a) => FromBlock (Maybe a) where
+instance FromBlock Text where
+  fromBlock (SBlock xs) = Success (VB.toList xs)
+  fromBlock x = Error $ "Expected Text but got " ++ (show $ blockType x)
+
+  toBlock = SBlock . VB.fromList
+
+instance (Default a, FromBlock a, Typeable a) => FromBlock (Maybe a) where
   fromBlock x@(MBlock {}) = unMask x
-  fromBlock _ = Error ""
+  fromBlock x = Error $ "Expected (Maybe " ++ ty ++ ") but got " ++ (show $ blockType x)
+    where ty = show (typeOf (undefined :: a)) -- XXX blech
 
   toBlock = reMask
 
@@ -171,7 +178,6 @@ instance Monoid Block where
 
 schema :: HDataFrame t k -> [(k, String)]
 schema (HDataFrame dt _) = fmap (fmap $ show . toConstr) (M.toList dt)
-
 
 -------------------------------------------------------------------------------
 -- Padding
