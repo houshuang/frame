@@ -91,31 +91,22 @@ refineBlock ST vs = sblock (go vs)
 parseVals :: CsvData BS.ByteString -> [[Val]]
 parseVals xs = transpose $ unVector $ V.map (V.map decodeVal) xs
 
-lower :: [Val] -> Block
-lower vs@((D x):_) = buildD vs []
-  where
-    buildD [] acc = dblock acc
-    buildD ((D x):xs) acc = buildD xs (x:acc)
-lower vs@((I x):_) = buildI vs []
-  where
-    buildI [] acc = iblock acc
-    buildI ((I x):xs) acc = buildI xs (x:acc)
-lower vs@((S x):_) = buildS vs []
-  where
-    buildS [] acc = sblock acc
-    buildS ((S x):xs) acc = buildS xs (x:acc)
-
-allAlike :: [Val] -> Bool
-allAlike xs = all (like t) xs
-  where t = head xs
-
-lowerTypes :: [Val] -> Block
-lowerTypes xs | allAlike xs = lower xs
-              | otherwise = error ("unlike" ++ (show xs))
-
 -------------------------------------------------------------------------------
 -- Types
 -------------------------------------------------------------------------------
+
+-- Columns types have a subsumption rule which dictates when we upcast the type of the
+-- values in column. If we have a column of Bool values with a single String element
+-- in the middle of the data then then we upcast to String. If the user specifes (Maybe a)
+-- type for the column then the column treats mismatched values as missing values.
+--
+-- a <: a
+-- a <: b |- Maybe a <: Maybe b
+
+-- Double   <: String
+-- Bool     <: String
+-- Datetime <: String
+-- Int      <: Double
 
 subsumes :: Type -> Type -> Bool
 subsumes ST _  = True
@@ -185,6 +176,7 @@ fromCsv fname = do
         Left err -> error err
         Right blocks -> return $ Right $ fromBlocks blocks [1..n]
 
+fromCsvHeaders :: FilePath -> IO (Either String (HDataFrame Int Text))
 fromCsvHeaders fname = do
   contents <- BLS.readFile fname
   let result = parseCsv contents
