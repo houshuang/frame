@@ -50,9 +50,11 @@ module Data.Frame.HFrame (
   mapNum,
   mapOrd,
   mapFrac,
+  -}
 
   hcat,
 
+  {-
   sumCol,
 
   mean,
@@ -405,14 +407,14 @@ instance (Indexable i) => Apply (HDataFrame i k) where
 
 -- Select column.
 col :: (Columnable k, Indexable i) => HDataFrame i k -> k -> (HDataFrame i k)
-(HDataFrame dt ix) `col` k =
+col (HDataFrame dt ix) k =
   case M.lookup k dt of
     Just v -> HDataFrame (M.singleton k v) ix
     Nothing -> error $ "no such column: " ++ (show k)
 
 -- Select row by label.
 {-row :: (Indexable i) => HDataFrame i k -> i -> (HDataFrame i k)-}
-(HDataFrame dt ix) `row` i =
+row (HDataFrame dt ix) i =
   case V.elemIndex (ixto i) ix of
     Just i' -> HDataFrame (M.map (ixblock i') dt) (V.singleton i)
     Nothing -> error $ "no such row: " ++ (show i)
@@ -470,11 +472,13 @@ ifilters is df@(HDataFrame dt ix) = applyVec f df
 -- Filter by predicate on column.
 filterCol :: (k -> Bool) -> HDataFrame i k -> HDataFrame i k
 filterCol p (HDataFrame dt ix) = HDataFrame (M.filterWithKey (\k _ -> p k) dt) ix
+-}
 
 -- Horizontal concatentation of frames.
 hcat :: (Eq i, Eq k, Hashable k) => HDataFrame i k -> HDataFrame i k -> HDataFrame i k
 hcat (HDataFrame dt ix) (HDataFrame dt' ix') = HDataFrame (alignMaps $ M.union dt dt') ix
 
+{-
 sum :: (Indexable i, Columnable k) => HDataFrame i k -> HDataFrame i k
 sum = foldNum (+)
 
