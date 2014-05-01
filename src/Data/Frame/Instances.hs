@@ -1,20 +1,40 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Data.Frame.Instances (
+  get,
   col,
-  (!),
+  cols,
+  colsWhere,
 
-  blocks,
-  index,
-  alter,
+  (!),
+  row,
+  rows,
+  rowsWhere,
+
+  drop,
+  head,
+  tail,
+  last,
+  vFilter,
+
+  select,
+  slice,
+
+  -- XXX: don't export
+  _Index,
+  _Data,
 ) where
 
+import Prelude hiding (drop, take, head, last, tail, null)
+
 import Data.Frame.HFrame
-import Data.Frame.Internal (Columnable, hdfdata, hdfindex)
+import Data.Frame.Internal (Columnable, _Data, _Index, _filterKeys)
 import qualified Data.Frame.Internal as I
-{-import qualified Data.Vector as VB-}
+
+import qualified Data.Vector as VB
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
 
@@ -22,8 +42,9 @@ import Data.Hashable (Hashable(..))
 import qualified Data.HashMap.Strict as M
 
 import Control.Applicative
-import Control.Lens ((&), (^.), (^?), (.~), at, (<&>), _Just, to, over, traverse, (%~))
+import Control.Lens hiding (index)
 import Control.Lens (Index, IxValue, Ixed(..), At(..))
+import Control.Lens.Empty (AsEmpty)
 
 type instance IxValue (HDataFrame k a) = Block
 type instance Index (HDataFrame k a) = a
@@ -39,28 +60,98 @@ instance (Ord a, Hashable a) => At (HDataFrame k a) where
     Just v' -> HDataFrame (M.insert k v' m) ix
     where mv = M.lookup k m
 
+instance AsEmpty (HDataFrame k a) where
+  _Empty = nearly (HDataFrame (M.empty) (VB.empty)) null
+
 -------------------------------------------------------------------------------
--- Lens Getters
+-- Getters
 -------------------------------------------------------------------------------
 
--- | View a column.
-col k = at k._Just.to(fromBlock)
+-- | Extract a column to a Haskell list.
+get k = ix k.to(fromBlock)
 
 -- | Select a column.
 (!) :: (Columnable a, Ord a, FromBlock b) => HDataFrame k a -> a -> Result [b]
-df ! k = df ^. col k
+df ! k = df ^. get k
 
--- | Alter the block structure
-blocks:: (forall v a. VG.Vector v a => v a -> v a) -> HDataFrame a k -> HDataFrame a k
-{-blocks:: (Block -> Block) -> HDataFrame a k -> HDataFrame a k-}
-blocks f df = df & hdfdata.traverse %~ (btraverse f)
+-------------------------------------------------------------------------------
+-- Filters
+-------------------------------------------------------------------------------
 
--- | Alter the index
-index :: (VU.Vector a -> VU.Vector b) -> HDataFrame a k -> HDataFrame b k
-index f df = df & hdfindex %~ f
+colsWhere :: (k -> Bool) -> HDataFrame i k -> HDataFrame i k
+colsWhere k = _Data %~ _filterKeys k
 
-alter :: (forall v a. VG.Vector v a => v a -> v a)
-      -> (VU.Vector a -> VU.Vector a)
-      -> HDataFrame a k -> HDataFrame a k
-alter f g df = df & (hdfdata.traverse %~ (btraverse f))
-                  . (hdfindex %~ g)
+col :: (Eq k) => k -> HDataFrame i k -> HDataFrame i k
+col k = colsWhere (==k)
+
+cols :: (Eq k) => [k] -> HDataFrame i k -> HDataFrame i k
+cols ks = colsWhere (`elem` ks)
+
+rowsWhere :: (i -> Bool) -> HDataFrame i k -> HDataFrame i k
+rowsWhere f df =
+  let indexMatcher = vFilter f (df ^. _Index) in
+  -- XXX why does inference break under CSE here?
+  df & (_Data.traverse %~ btraverse (vFilter f (df ^. _Index)))
+     . (_Index %~ indexMatcher)
+
+row :: Eq i => i -> HDataFrame i k -> HDataFrame i k
+row i = rowsWhere (==i)
+
+rows :: Eq i => [i] -> HDataFrame i k -> HDataFrame i k
+rows i = rowsWhere (`elem` i)
+
+-- Build a hitmap matching a predicate and filter all rows based on the index.
+vFilter :: (VG.Vector v1 a, VG.Vector v1 Bool, VG.Vector v a1)
+           => (a -> Bool)
+           -> v1 a
+           -> v a1
+           -> v a1
+vFilter f xs ys = VG.ifilter (\i _ -> (ms VG.! i) == True) ys
+  where ms = VG.map f xs
+
+-------------------------------------------------------------------------------
+-- Mutators
+-------------------------------------------------------------------------------
+
+-- This doesn't in general maintain the invariant that the index is the same length as all the blocks.
+
+_blocks :: (forall v a. VG.Vector v a => v a -> v a)
+        -> HDataFrame a k
+        -> HDataFrame a k
+_blocks f = _Data.traverse %~ btraverse f
+
+_index :: (VB.Vector a -> VB.Vector a)
+       -> HDataFrame a k
+       -> HDataFrame a k
+_index g = _Index %~ g
+
+_alter :: (forall v a. VG.Vector v a => v a -> v a)
+       -> (VB.Vector a -> VB.Vector a)
+       -> HDataFrame a k
+       -> HDataFrame a k
+_alter f g = _blocks f . _index g
+
+-------------------------------------------------------------------------------
+-- Functions
+-------------------------------------------------------------------------------
+
+drop :: Int -> HDataFrame a k -> HDataFrame a k
+drop n = _alter (VG.drop n) (VG.drop n)
+
+take :: Int -> HDataFrame a k -> HDataFrame a k
+take n = _alter (VG.take n) (VG.take n)
+
+select :: Int -> HDataFrame a k -> HDataFrame a k
+select k = _alter (VG.singleton . (VG.! k)) (VG.singleton . (VG.! k))
+
+slice :: Int -> Int -> HDataFrame a k -> HDataFrame a k
+slice a b = _alter (VG.slice a b) (VG.slice a b)
+
+head :: HDataFrame a k -> HDataFrame a k
+head = _alter (VG.singleton . VG.head) (VG.singleton . VG.head)
+
+last :: HDataFrame a k -> HDataFrame a k
+last = _alter (VG.singleton . VG.last) (VG.singleton . VG.last)
+
+tail :: HDataFrame a k -> HDataFrame a k
+tail = _alter (VG.tail) (VG.tail)

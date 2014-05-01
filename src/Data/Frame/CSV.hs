@@ -5,7 +5,7 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module Data.Frame.CSV (
-  fromCsv,
+  fromCsvNoHeaders,
   fromCsvHeaders
 ) where
 
@@ -164,14 +164,14 @@ typeVal (M x) = error "maybe type"
 -- Toplevel
 -------------------------------------------------------------------------------
 
-fromCsv :: FilePath -> IO (Either String (HDataFrame Int Int))
-fromCsv fname = do
+fromCsvNoHeaders :: FilePath -> IO (Either String (HDataFrame Int Int))
+fromCsvNoHeaders fname = do
   contents <- BLS.readFile fname
   let result = parseCsv contents
   case result of
     Left err -> return $ Left err
     Right bs -> do
-      let xs = parseVals (V.tail bs)
+      let xs = parseVals bs
       let n = length xs
       case refine xs of
         Left err -> error err

@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -7,22 +8,29 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+
+{-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
 
 module Data.Frame.Internal (
   HDataFrame(..),
   Block(..),
   --Index,
 
+  _filterKeys,
+  _alterKeys,
+
   Columnable,
   Indexable(..),
   Default(..),
   Result(..),
 
+  resultEither,
   blockType,
 
   -- ** Lenses
-  hdfdata,
-  hdfindex,
+  _Data,
+  _Index,
 
   -- ** Prisms
   _DBlock,
@@ -36,7 +44,7 @@ module Data.Frame.Internal (
 import Data.Foldable
 import Data.Traversable
 import qualified Data.Vector as VB
-import qualified Data.Vector.Unboxed as V
+import qualified Data.Vector.Unboxed as VU
 import qualified Data.HashMap.Strict as M
 
 import Data.Data
@@ -49,7 +57,7 @@ import Data.Text (Text, pack, empty)
 
 import Control.Monad
 import Control.Applicative
-import Control.Lens (makeLenses, makePrisms)
+import Control.Lens (lens, prism, Lens', Prism', makePrisms)
 
 -------------------------------------------------------------------------------
 -- Indexes and Columns
@@ -66,7 +74,7 @@ type instance IxRep Bool     = Bool
 type instance IxRep DateTime = Int
 
 class (Eq k, Show k, Hashable k) => Columnable k where
-class (Ord i, Show i, V.Unbox (IxRep i), Default i) => Indexable i where
+class (Ord i, Show i, VU.Unbox (IxRep i), Default i) => Indexable i where
   ixto   :: i -> IxRep i
   ixfrom :: IxRep i -> i
 
@@ -103,20 +111,40 @@ instance Indexable DateTime where
 -- The heterogeneously typed dataframe.
 data HDataFrame i k = HDataFrame
   { _hdfdata  :: !(M.HashMap k Block)
-  , _hdfindex :: !(V.Vector i)
+  , _hdfindex :: !(VB.Vector i)
   } deriving (Eq)
+
+_Index :: Functor f
+       => (VB.Vector t -> f (VB.Vector i))
+       -> HDataFrame t k
+       -> f (HDataFrame i k)
+_Index = lens _hdfindex (\f new -> f { _hdfindex = new })
+
+_Data :: Functor f
+      => (M.HashMap t Block -> f (M.HashMap k Block))
+      -> HDataFrame i t
+      -> f (HDataFrame i k)
+_Data = lens _hdfdata (\f new -> f { _hdfdata = new })
+
+-- does a deep copy
+_alterKeys ::(Eq b, Hashable b) => (a -> b) -> M.HashMap a v -> M.HashMap b v
+_alterKeys f xs = M.fromList $ [(f a,b) | (a,b) <- M.toList xs]
+
+-- O(n)
+_filterKeys :: (k -> Bool) -> M.HashMap k v -> M.HashMap k v
+_filterKeys f xs = M.filterWithKey (\k _ -> f k) xs
 
 -------------------------------------------------------------------------------
 -- Blocks
 -------------------------------------------------------------------------------
 
 data Block
-  = DBlock !(V.Vector Double)
-  | IBlock !(V.Vector Int)
-  | BBlock !(V.Vector Bool)
+  = DBlock !(VU.Vector Double)
+  | IBlock !(VU.Vector Int)
+  | BBlock !(VU.Vector Bool)
   | MBlock {
      _mdata  :: !Block
-   , _bitmap :: !(V.Vector Bool)
+   , _bitmap :: !(VU.Vector Bool)
    }
   | SBlock !(VB.Vector Text)
   | NBlock
@@ -145,6 +173,53 @@ instance Default DateTime where
 
 instance Default (Maybe a) where
   def = Nothing
+
+_DBlock :: Prism' Block (VU.Vector Double)
+_DBlock = prism remit review
+  where
+    remit a = DBlock a
+
+    review (DBlock a) = Right a
+    review a = Left a
+
+_IBlock :: Prism' Block (VU.Vector Int)
+_IBlock = prism remit review
+  where
+    remit a = IBlock a
+
+    review (IBlock a) = Right a
+    review a          = Left a
+
+_BBlock :: Prism' Block (VU.Vector Bool)
+_BBlock = prism remit review
+  where
+    remit a = BBlock a
+
+    review (BBlock a) = Right a
+    review a          = Left a
+
+_MBlock :: Prism' Block (Block, VU.Vector Bool)
+_MBlock
+  = prism remit review
+  where
+      remit (a, b) = MBlock a b
+      review (MBlock a b) = Right (a, b)
+      review a = Left a
+
+_SBlock :: Prism' Block (VB.Vector Text)
+_SBlock = prism remit review
+  where
+    remit a = SBlock a
+
+    review (SBlock a) = Right a
+    review a = Left a
+
+_NBlock :: Prism' Block ()
+_NBlock = prism remit review
+  where
+      remit () = NBlock
+      review NBlock = Right ()
+      review a = Left a
 
 -------------------------------------------------------------------------------
 -- Block Type
@@ -208,5 +283,6 @@ instance Alternative Result where
   (<|>) = mplus
   {-# INLINE (<|>) #-}
 
-makeLenses ''HDataFrame
-makePrisms ''Block
+resultEither :: Result b -> Either String b
+resultEither (Error x)   = Left x
+resultEither (Success x) = Right x

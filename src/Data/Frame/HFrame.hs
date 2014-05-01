@@ -33,6 +33,7 @@ module Data.Frame.HFrame (
 
   schema,
 
+  null,
   fromMap,
   fromBlocks,
   singleton,
@@ -42,7 +43,7 @@ module Data.Frame.HFrame (
 
 ) where
 
-import Prelude hiding (maximum, sum, filter, drop, take)
+import Prelude hiding (maximum, sum, filter, drop, take, null)
 
 import Control.Monad hiding (
     forM , forM_ , mapM , mapM_ , msum , sequence , sequence_ )
@@ -249,11 +250,11 @@ mapMask f xs ys = VU.zipWith (go f) xs ys
 -------------------------------------------------------------------------------
 
 -- | Construct hdataframe from a Map.
-fromMap :: (Columnable k, VU.Unbox i, Num i, Enum i) => [(k, Block)] -> HDataFrame i k
+fromMap :: (Columnable k, Num i, Enum i) => [(k, Block)] -> HDataFrame i k
 fromMap xs = HDataFrame df_data df_ix
   where
     df_data = M.fromList $ aligned
-    df_ix   = VU.enumFromTo 0 (fromIntegral nrows)
+    df_ix   = VB.enumFromTo 0 (fromIntegral nrows)
 
     aligned = alignCols xs
 
@@ -267,22 +268,43 @@ fromMap xs = HDataFrame df_data df_ix
 fromBlocks :: (Eq k, Hashable k) => [Block] -> [k] -> HDataFrame Int k
 fromBlocks xs cols = HDataFrame (M.fromList $ zip cols xs) df_ix
   where
-    df_ix = VU.enumFromTo 0 (fromIntegral nrows)
+    df_ix = VB.enumFromTo 0 (fromIntegral nrows)
     ncols = length xs
     nrows = maximum $ fmap blen xs
 
 -- | Construct a dataframe from a singular index, key and block.
-singleton :: Columnable k => k -> VU.Vector i -> Block -> HDataFrame i k
+singleton :: Columnable k => k -> VB.Vector i -> Block -> HDataFrame i k
 singleton k i v = HDataFrame (M.fromList $ [(k, v)]) i
+
+-------------------------------------------------------------------------------
+-- Deconstructors
+-------------------------------------------------------------------------------
+
+null :: HDataFrame a k -> Bool
+null (HDataFrame df ix) = M.null df && VB.null ix
+
+-- hack to allow us to apply Fractional functions over Integral columsn, unsafe with respect to
+-- overflow/underflow
+castDoubleTransform :: (Double -> Double) -> Int -> Int
+castDoubleTransform f = GHC.double2Int . f . GHC.int2Double
+
+-- Transform the index
+{-transformIndex :: (Indexable a, Indexable b) => (a -> b) -> HDataFrame a k -> HDataFrame b k-}
+transformIndex f (HDataFrame dt ix) = HDataFrame dt (VB.map (ixto . f.  ixfrom) ix)
+
+-- Transform the columns
+transformKeys :: (Columnable a, Columnable b) => (a -> b) -> HDataFrame i a -> HDataFrame i b
+transformKeys f (HDataFrame dt ix) = HDataFrame dt' ix
+  where dt' = M.fromList [((f k), v) | (k, v) <- M.toList dt]
 
 -------------------------------------------------------------------------------
 -- Pretty Printing
 -------------------------------------------------------------------------------
 
-showHDataFrame :: (Pretty i, Pretty k, VU.Unbox i) => HDataFrame i k -> String
+showHDataFrame :: (Pretty i, Pretty k) => HDataFrame i k -> String
 showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ body
   where
-    index = pix (VU.toList ix) -- show index
+    index = pix (VB.toList ix) -- show index
     cols = (fmap pcols $ showBlocks (M.toList dt)) -- show cols
     body = index : cols
 
@@ -305,23 +327,6 @@ showBlocks = fmap (fmap showBlock)
     unpackMissing a True = a
     unpackMissing _ False = "na"
 
--------------------------------------------------------------------------------
--- Deconstructors
--------------------------------------------------------------------------------
-
--- hack to allow us to apply Fractional functions over Integral columsn, unsafe with respect to
--- overflow/underflow
-castDoubleTransform :: (Double -> Double) -> Int -> Int
-castDoubleTransform f = GHC.double2Int . f . GHC.int2Double
-
--- Transform the index
-{-transformIndex :: (Indexable a, Indexable b) => (a -> b) -> HDataFrame a k -> HDataFrame b k-}
-transformIndex f (HDataFrame dt ix) = HDataFrame dt (VU.map (ixto . f.  ixfrom) ix)
-
--- Transform the columns
-transformKeys :: (Columnable a, Columnable b) => (a -> b) -> HDataFrame i a -> HDataFrame i b
-transformKeys f (HDataFrame dt ix) = HDataFrame dt' ix
-  where dt' = M.fromList [((f k), v) | (k, v) <- M.toList dt]
 
 -------------------------------------------------------------------------------
 -- Indexing
