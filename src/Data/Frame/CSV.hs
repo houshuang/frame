@@ -5,7 +5,8 @@
 
 module Data.Frame.CSV (
   fromCsvNoHeaders,
-  fromCsvHeaders
+  fromCsvHeaders,
+  fromCsvWith,
 ) where
 
 import Data.Frame.Types
@@ -25,6 +26,8 @@ import qualified Data.Vector as V
 import Data.Text.Encoding (decodeUtf8)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BLS
+
+import qualified Data.Attoparsec.Text as A
 import qualified Data.Attoparsec.Char8 as P8
 
 -------------------------------------------------------------------------------
@@ -34,20 +37,37 @@ import qualified Data.Attoparsec.Char8 as P8
 type CsvData a = V.Vector (V.Vector a)
 
 parseCsv :: BLS.ByteString -> Either String (CsvData BS.ByteString)
-parseCsv x = decode NoHeader x
+parseCsv = decode NoHeader
 
 parseCsvHeader :: BLS.ByteString -> Either String (CsvData BS.ByteString)
-parseCsvHeader x = decode HasHeader x
+parseCsvHeader = decode HasHeader
+
+parseVal :: P8.Parser Val
+parseVal =  P8.string "true"  *> pure (B True)
+        <|> P8.string "false" *> pure (B False)
+        <|> parseNumber
+        <|> parseString
+
+parseString :: P8.Parser Val
+parseString = S . decodeUtf8 <$> P8.takeByteString
+
+parseNumber :: P8.Parser Val
+parseNumber = do
+  v <- P8.number
+  case v of
+    (P8.D n) -> return $ D n
+    (P8.I n) -> return $ I (fromIntegral n)
 
 decodeVal :: BS.ByteString -> Val
-decodeVal x = case P8.parseOnly P8.number $ x of
+decodeVal x = case P8.parseOnly parseVal x of
   Left _         -> S (decodeUtf8 x)
-  Right (P8.D n) -> D n
-  Right (P8.I n) -> I (fromIntegral n)
+  Right val      -> val
 
 -------------------------------------------------------------------------------
 -- CSV Type Conversion
 -------------------------------------------------------------------------------
+
+-- Parse the data from the CSV file into the least general type possible for the column.
 
 refineColumn :: [Val] -> Either String Type
 refineColumn xs = go Nothing xs
@@ -86,37 +106,55 @@ refineBlock ST vs = sblock (go vs)
     go [] = []
     go ((S x):xs) = x : go xs
 
+-- Cassava gives us data row-wise, but we need it column wise. So we do a ridiculously expensive transpose
+-- transpose.
 parseVals :: CsvData BS.ByteString -> [[Val]]
 parseVals xs = transpose $ unVector $ V.map (V.map decodeVal) xs
-  where unVector = V.toList . (V.map V.toList) -- XXX
+  where
+    unVector :: CsvData a -> [[a]]
+    unVector = V.toList . (V.map V.toList)
 
 -------------------------------------------------------------------------------
 -- Toplevel
 -------------------------------------------------------------------------------
 
+data CsvOptions = CsvOptions
+  { indexCol   :: Int
+  , header     :: Bool
+  , delimeter  :: Text
+  } deriving (Eq, Show)
+
+-- | Parse a CSV file into DataFrame
 fromCsvNoHeaders :: FilePath -> IO (Either String (HDataFrame Int Int))
 fromCsvNoHeaders fname = do
   contents <- BLS.readFile fname
-  let result = parseCsv contents
-  case result of
+
+  case parseCsv contents of
     Left err -> return $ Left err
     Right bs -> do
-      let xs = parseVals bs
-      let n = length xs
-      case refine xs of
+      let vals = parseVals bs
+      let n = length vals
+
+      case refine vals of
         Left err -> error err
         Right blocks -> return $ Right $ fromBlocks blocks [1..n]
 
+-- | Parse a CSV file without headers into DataFrame
 fromCsvHeaders :: FilePath -> IO (Either String (HDataFrame Int Text))
 fromCsvHeaders fname = do
   contents <- BLS.readFile fname
-  let result = parseCsv contents
-  case result of
+  print (parseCsv contents)
+
+  case parseCsv contents of
     Left err -> return $ Left err
     Right bs -> do
-      let hdr = Prelude.map decodeUtf8 $ V.toList $ V.head bs
-      let xs = parseVals (V.init bs)
-      let n = length xs
-      case refine xs of
+      let (bs0, bs1) = (V.head bs, V.tail bs)
+      let headers = fmap decodeUtf8 $ V.toList $ bs0
+      let vals = parseVals bs1
+
+      case refine vals of
         Left err -> error err
-        Right blocks -> return $ Right $ fromBlocks blocks hdr
+        Right blocks -> return $ Right $ fromBlocks blocks headers
+
+fromCsvWith :: CsvOptions -> FilePath -> IO (Either String (HDataFrame Int Text))
+fromCsvWith = undefined

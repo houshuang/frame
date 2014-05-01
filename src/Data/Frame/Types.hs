@@ -1,6 +1,15 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
-module Data.Frame.Types where
+module Data.Frame.Types (
+  Val(..),
+  Type(..),
+
+  subsumes,
+  subsume,
+  like,
+  typeVal,
+
+) where
 
 import Data.Data
 import Data.DateTime
@@ -68,9 +77,10 @@ data Val
   | T !DateTime
   deriving (Eq, Show, Ord, Data, Typeable)
 
-typeVal (D x) = DT
-typeVal (I x) = IT
-typeVal (S x) = ST
-typeVal (B x) = BT
-typeVal (T x) = TT
-typeVal (M x) = error "maybe type"
+typeVal :: Val -> Type
+typeVal (D _) = DT
+typeVal (I _) = IT
+typeVal (S _) = ST
+typeVal (B _) = BT
+typeVal (T _) = TT
+typeVal (M _) = error "maybe type"
