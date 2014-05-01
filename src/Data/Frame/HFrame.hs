@@ -18,6 +18,8 @@ module Data.Frame.HFrame (
   transformIndex,
   transformKeys,
 
+  hcat,
+
   Block(..),
   dblock,
   iblock,
@@ -37,9 +39,6 @@ module Data.Frame.HFrame (
   fromMap,
   fromBlocks,
   singleton,
-
-  -- col,
-  -- row,
 
 ) where
 
@@ -211,6 +210,12 @@ alignCols xs = zip a (alignVecs b)
 {-alignIndex :: (Default i, Indexable i) => Index i -> Int -> Index i-}
 alignIndex ix n = pad (n - VU.length ix) (ixto ix)
 
+hcat :: (Eq i, Eq k, Hashable k) => HDataFrame i k -> HDataFrame i k -> HDataFrame i k
+hcat (HDataFrame dt ix) (HDataFrame dt' ix') = HDataFrame (alignMaps $ M.union dt dt') maxIx
+  where
+    maxIx | VB.length ix > VB.length ix' = ix
+          | otherwise = ix'
+
 -------------------------------------------------------------------------------
 -- Mask
 -------------------------------------------------------------------------------
@@ -323,41 +328,17 @@ showBlocks = fmap (fmap showBlock)
     showBlock (BBlock xs) = fmap show $ VU.toList xs
     showBlock (SBlock xs) = fmap unpack $ VB.toList xs
     showBlock (MBlock xs bm) = zipWith unpackMissing (showBlock xs) (VU.toList bm)
+    showBlock NBlock = ["()"]
 
     unpackMissing a True = a
     unpackMissing _ False = "na"
 
-
 -------------------------------------------------------------------------------
 -- Indexing
 -------------------------------------------------------------------------------
-
--- Select column.
-col :: (Columnable k, Indexable i) => HDataFrame i k -> k -> (HDataFrame i k)
-col (HDataFrame dt ix) k =
-  case M.lookup k dt of
-    Just v -> HDataFrame (M.singleton k v) ix
-    Nothing -> error $ "no such column: " ++ (show k)
-
-{-
--- Select row by label.
-row :: (Indexable i) => HDataFrame i k -> i -> (HDataFrame i k)
-row (HDataFrame dt ix) i =
-  case VU.elemIndex (ixto i) ix of
-    Just i' -> HDataFrame (M.map (ixblock i') dt) (VU.singleton i)
-    Nothing -> error $ "no such row: " ++ (show i)
-
-  where
-    ixblock :: Apply a => Int -> a -> a
-    ixblock j = applyVec (VU.singleton . (VU.! j))
--}
 
 nrows :: HDataFrame i k -> Int
 nrows (HDataFrame dt _) = blen $ snd $ head (M.toList dt)
 
 ncols :: HDataFrame i k -> Int
 ncols (HDataFrame dt _) = M.size dt
-
--------------------------------------------------------------------------------
--- Selection
--------------------------------------------------------------------------------
