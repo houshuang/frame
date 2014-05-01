@@ -11,7 +11,7 @@
 module Data.Frame.Internal (
   HDataFrame(..),
   Block(..),
-  Index,
+  --Index,
 
   Columnable,
   Indexable(..),
@@ -55,7 +55,7 @@ import Control.Lens (makeLenses, makePrisms)
 -- Indexes and Columns
 -------------------------------------------------------------------------------
 
-type Index i = V.Vector i
+-- type Index i = V.Vector i
 
 type family IxRep (s :: *) :: *
 type instance IxRep Int      = Int
@@ -103,7 +103,7 @@ instance Indexable DateTime where
 -- The heterogeneously typed dataframe.
 data HDataFrame i k = HDataFrame
   { _hdfdata  :: !(M.HashMap k Block)
-  , _hdfindex :: !(Index i)
+  , _hdfindex :: !(V.Vector i)
   } deriving (Eq)
 
 -------------------------------------------------------------------------------

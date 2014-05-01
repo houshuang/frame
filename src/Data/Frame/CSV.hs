@@ -111,6 +111,7 @@ parseVals xs = transpose $ unVector $ V.map (V.map decodeVal) xs
 subsumes :: Type -> Type -> Bool
 subsumes ST _  = True
 subsumes DT IT = True
+subsumes (MT a) (MT b) = subsumes a b
 subsumes _ _ = False
 
 subsume :: Type -> Val -> Val

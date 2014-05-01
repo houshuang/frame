@@ -1,17 +1,22 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Data.Frame.Instances (
   col,
   (!),
 
   blocks,
-  index
+  index,
+  alter,
 ) where
 
 import Data.Frame.HFrame
 import Data.Frame.Internal (Columnable, hdfdata, hdfindex)
 import qualified Data.Frame.Internal as I
+{-import qualified Data.Vector as VB-}
+import qualified Data.Vector.Generic as VG
+import qualified Data.Vector.Unboxed as VU
 
 import Data.Hashable (Hashable(..))
 import qualified Data.HashMap.Strict as M
@@ -46,9 +51,16 @@ col k = at k._Just.to(fromBlock)
 df ! k = df ^. col k
 
 -- | Alter the block structure
-blocks :: (Block -> Block) -> HDataFrame a k -> HDataFrame a k
-blocks f df = df & hdfdata.traverse %~ f
+blocks:: (forall v a. VG.Vector v a => v a -> v a) -> HDataFrame a k -> HDataFrame a k
+{-blocks:: (Block -> Block) -> HDataFrame a k -> HDataFrame a k-}
+blocks f df = df & hdfdata.traverse %~ (btraverse f)
 
 -- | Alter the index
-index :: (I.Index a -> I.Index b) -> HDataFrame a k -> HDataFrame b k
+index :: (VU.Vector a -> VU.Vector b) -> HDataFrame a k -> HDataFrame b k
 index f df = df & hdfindex %~ f
+
+alter :: (forall v a. VG.Vector v a => v a -> v a)
+      -> (VU.Vector a -> VU.Vector a)
+      -> HDataFrame a k -> HDataFrame a k
+alter f g df = df & (hdfdata.traverse %~ (btraverse f))
+                  . (hdfindex %~ g)
