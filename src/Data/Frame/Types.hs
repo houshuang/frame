@@ -16,6 +16,7 @@ import Data.Data
 import Data.DateTime
 import Data.Text (Text, pack)
 import Data.Frame.Internal (Default(..))
+import Control.DeepSeq (NFData(..))
 
 -------------------------------------------------------------------------------
 -- Types
@@ -104,6 +105,15 @@ data Val
   | T !DateTime
   | NA
   deriving (Eq, Show, Ord, Data, Typeable)
+
+instance NFData Val where
+  rnf (D _) = ()
+  rnf (I _) = ()
+  rnf (S _) = ()
+  rnf (B a) = rnf a
+  rnf (M a) = rnf a
+  rnf (T a) = rnf a
+  rnf NA = ()
 
 typeVal :: Val -> Type
 typeVal (D _) = DT

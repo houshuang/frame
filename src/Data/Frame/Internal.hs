@@ -60,6 +60,7 @@ import Data.Text (Text, pack, empty)
 import Control.Monad
 import Control.Applicative
 import Control.Lens (lens, prism, Lens', Prism', makePrisms)
+import Control.DeepSeq (NFData(..))
 
 -------------------------------------------------------------------------------
 -- Indexes and Columns
@@ -115,6 +116,9 @@ data HDataFrame i k = HDataFrame
   { _hdfdata  :: !(M.HashMap k Block)
   , _hdfindex :: !(VB.Vector i)
   } deriving (Eq)
+
+instance NFData k => NFData (HDataFrame i k) where
+  rnf (HDataFrame dt _) = rnf dt
 
 _Index :: Functor f
        => (VB.Vector t -> f (VB.Vector i))
@@ -179,6 +183,10 @@ data Block
   | SBlock !(VB.Vector Text)
   | NBlock
   deriving (Eq, Show, Data, Typeable)
+
+instance NFData Block where
+  rnf (MBlock dat _) = rnf dat
+  rnf _ = ()
 
 _DBlock :: Prism' Block (VU.Vector Double)
 _DBlock = prism remit review

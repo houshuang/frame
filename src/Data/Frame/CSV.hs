@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 
 {-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
 
@@ -35,6 +36,7 @@ import qualified Data.ByteString.Lazy as BLS
 
 import qualified Data.Attoparsec.Text as A
 import qualified Data.Attoparsec.Char8 as P8
+import Control.DeepSeq (deepseq)
 
 -------------------------------------------------------------------------------
 -- Parsing
@@ -86,7 +88,7 @@ refineFrame = sequence . fmap refineColumn
 refine :: [[Val]] -> Either String [Block]
 refine cols = do
   tys <- refineFrame cols
-  let svals = zipWith subsumeColumn tys cols
+  let svals = tys `seq` zipWith subsumeColumn tys cols
   return $ zipWith refineBlock tys svals
 
 subsumeColumn :: Type -> [Val] -> [Val]
