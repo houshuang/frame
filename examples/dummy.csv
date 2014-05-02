@@ -1,4 +1,4 @@
-100,200
-1,2
-2,3
-3,2.1
+ints,doubles,bools,strings
+1,2,true,foo
+2,3,false,bar
+3,2.1,true,fizz

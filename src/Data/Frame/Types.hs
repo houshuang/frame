@@ -43,13 +43,19 @@ subsume ST v = case v of
   D x -> S (pack $ show x)
   I x -> S (pack $ show x)
   S x -> S x
-  B x -> S (pack $ show x)
+  B True  -> S (pack "true")
+  B False -> S (pack "false")
   T x -> S (pack $ show x)
+  M x -> error "maybe case"
 subsume DT v = case v of
   D x -> D x
   I x -> D (fromIntegral x)
+  M x -> error "maybe case"
 subsume IT v = case v of
   I x -> I x
+  M x -> error "maybe case"
+subsume BT v = case v of
+  B x -> B x
 
 like :: Val -> Val -> Bool
 like (D _) (D _) = True

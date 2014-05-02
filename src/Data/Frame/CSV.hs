@@ -58,6 +58,7 @@ parseNumber = do
     (P8.D n) -> return $ D n
     (P8.I n) -> return $ I (fromIntegral n)
 
+
 decodeVal :: BS.ByteString -> Val
 decodeVal x = case P8.parseOnly parseVal x of
   Left _         -> S (decodeUtf8 x)
@@ -81,7 +82,7 @@ refineColumn xs = go Nothing xs
       | otherwise                = Left "No subsumption"
 
 refineFrame :: [[Val]] -> Either String [Type]
-refineFrame = sequence . map refineColumn
+refineFrame = sequence . fmap refineColumn
 
 refine :: [[Val]] -> Either String [Block]
 refine cols = do
@@ -90,21 +91,14 @@ refine cols = do
   return $ zipWith refineBlock tys svals
 
 subsumeColumn :: Type -> [Val] -> [Val]
-subsumeColumn ty xs = map (subsume ty) xs
+subsumeColumn ty xs = fmap (subsume ty) xs
 
+-- Unbox the types after we've guaranteed that all the types in the column are the most general type.
 refineBlock :: Type -> [Val] -> Block
-refineBlock IT vs = iblock (go vs)
-  where
-    go [] = []
-    go ((I x):xs) = x : go xs
-refineBlock DT vs = dblock (go vs)
-  where
-    go [] = []
-    go ((D x):xs) = x : go xs
-refineBlock ST vs = sblock (go vs)
-  where
-    go [] = []
-    go ((S x):xs) = x : go xs
+refineBlock IT vs = iblock (fmap (\(I x) -> x) vs)
+refineBlock DT vs = dblock (fmap (\(D x) -> x) vs)
+refineBlock ST vs = sblock (fmap (\(S x) -> x) vs)
+refineBlock BT vs = bblock (fmap (\(B x) -> x) vs)
 
 -- Cassava gives us data row-wise, but we need it column wise. So we do a ridiculously expensive transpose
 -- transpose.
@@ -124,7 +118,7 @@ data CsvOptions = CsvOptions
   , delimeter  :: Text
   } deriving (Eq, Show)
 
--- | Parse a CSV file into DataFrame
+-- | Parse a CSV file without headers into DataFrame
 fromCsvNoHeaders :: FilePath -> IO (Either String (HDataFrame Int Int))
 fromCsvNoHeaders fname = do
   contents <- BLS.readFile fname
@@ -139,11 +133,10 @@ fromCsvNoHeaders fname = do
         Left err -> error err
         Right blocks -> return $ Right $ fromBlocks blocks [1..n]
 
--- | Parse a CSV file without headers into DataFrame
+-- | Parse a CSV file with headers into DataFrame
 fromCsvHeaders :: FilePath -> IO (Either String (HDataFrame Int Text))
 fromCsvHeaders fname = do
   contents <- BLS.readFile fname
-  print (parseCsv contents)
 
   case parseCsv contents of
     Left err -> return $ Left err
@@ -157,4 +150,6 @@ fromCsvHeaders fname = do
         Right blocks -> return $ Right $ fromBlocks blocks headers
 
 fromCsvWith :: CsvOptions -> FilePath -> IO (Either String (HDataFrame Int Text))
-fromCsvWith = undefined
+fromCsvWith opts file = case header opts of
+  True  -> fromCsvHeaders file
+  False -> undefined -- fromCsvNoHeaders file

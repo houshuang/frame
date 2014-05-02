@@ -310,8 +310,8 @@ showHDataFrame :: (Pretty i, Pretty k) => HDataFrame i k -> String
 showHDataFrame (HDataFrame dt ix) = PB.render $ PB.hsep 2 PB.right $ body
   where
     index = pix (VB.toList ix) -- show index
-    cols = (fmap pcols $ showBlocks (M.toList dt)) -- show cols
-    body = index : cols
+    cols  = fmap pcols $ showBlocks (M.toList dt) -- show cols
+    body  = index : cols
 
     pcols (a, xs) = PB.vcat PB.left $ col ++ vals
       where

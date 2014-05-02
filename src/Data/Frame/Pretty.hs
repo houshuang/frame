@@ -3,7 +3,7 @@
 
 module Data.Frame.Pretty where
 
-import Data.Text
+import Data.Text (Text, unpack)
 
 import Text.PrettyPrint
 import qualified Text.PrettyPrint.Boxes as PB
@@ -15,7 +15,7 @@ instance Pretty String where
   ppr _ x = text x
 
 instance Pretty Bool where
-  ppr _ True = text "True"
+  ppr _ True  = text "True"
   ppr _ False = text "False"
 
 instance Pretty Int where
@@ -31,7 +31,7 @@ instance Pretty Float where
   ppr _ x = float x
 
 instance Pretty Text where
-  ppr _ x = text (show x)
+  ppr _ x = text (unpack x)
 
 -- | Lift a pretty printable object into a box.
 ppb :: Pretty a => a -> PB.Box
