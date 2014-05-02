@@ -120,16 +120,10 @@ data HDataFrame i k = HDataFrame
 instance NFData k => NFData (HDataFrame i k) where
   rnf (HDataFrame dt _) = rnf dt
 
-_Index :: Functor f
-       => (VB.Vector t -> f (VB.Vector i))
-       -> HDataFrame t k
-       -> f (HDataFrame i k)
+_Index :: Lens' (HDataFrame i k) (VB.Vector i)
 _Index = lens _hdfindex (\f new -> f { _hdfindex = new })
 
-_Data :: Functor f
-      => (M.HashMap t Block -> f (M.HashMap k Block))
-      -> HDataFrame i t
-      -> f (HDataFrame i k)
+_Data :: Lens' (HDataFrame i k) (M.HashMap k Block)
 _Data = lens _hdfdata (\f new -> f { _hdfdata = new })
 
 -- does a deep copy
