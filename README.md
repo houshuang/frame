@@ -7,11 +7,14 @@ A simple experiment in building a Pandas style dataframe in Haskell.
 Data.Frame.HFrame
 -----------------
 
-A ``HDataFrame`` is a named collection of columns containing potentially hetereogeneously-typed uniform sized
-vectors with row labeling information which can be used to index data.
+A ``HDataFrame`` is a named collection of columns containing potentially heterogeneously-typed uniform sized
+vectors with row labeling information which can be used to index data.  It is primarily a low-performance
+data-structure used to for exploratory analysis of data in similar fashion to a spreadsheet.
 
-It is primarily a low-performance data-structure used to for exploratory analysis of data in similar fashion
-to a spreadsheet.
+Internally the data is stored in a collection of unboxed vectors with the underlying storage and type
+information abstracted away from the end user with the purpose of creating a DataFrame which can consume
+arbitrary CSV files and have the library take care of column alignment and missing values without extra
+direction.
 
 Install
 -------
@@ -72,7 +75,7 @@ Subject to change but the initial API.
 
 λ: let ages = frame ^. get "age" :: Result [Maybe Double]
 
-λ: Data.List.take 5 <$> ages
+λ: take 5 <$> ages
 Success [Just 29.0,Just 0.916700006,Just 2.0,Just 30.0,Just 25.0]
 
 λ: avg <$> fmap catMaybes ages
