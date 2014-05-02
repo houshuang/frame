@@ -71,15 +71,7 @@ decodeVal x = case P8.parseOnly parseVal x of
 -- Parse the data from the CSV file into the least general type possible for the column.
 
 refineColumn :: [Val] -> Either String Type
-refineColumn xs = go Nothing xs
-  where
-    go (Just lub) [] = Right lub
-    go Nothing (x:xs) = go (Just (typeVal x)) xs
-    go (Just lub) (x:xs)
-      | lub == typeVal x         = go (Just lub) xs
-      | lub `subsumes` typeVal x = go (Just lub) xs
-      | typeVal x `subsumes` lub = go (Just (typeVal x)) xs
-      | otherwise                = Left "No subsumption"
+refineColumn xs = lub xs
 
 refineFrame :: [[Val]] -> Either String [Type]
 refineFrame = sequence . fmap refineColumn

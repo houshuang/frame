@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Data.Frame.Types (
   Val(..),
@@ -8,7 +9,8 @@ module Data.Frame.Types (
   subsume,
   like,
   typeVal,
-
+  lub,
+  lubNa
 ) where
 
 import Data.Data
@@ -19,10 +21,10 @@ import Data.Text (Text, pack)
 -- Types
 -------------------------------------------------------------------------------
 
--- Columns types have a subsumption rule which dictates when we upcast the type of the
--- values in column. If we have a column of Bool values with a single String element
--- in the middle of the data then then we upcast to String. If the user specifes (Maybe a)
--- type for the column then the column treats mismatched values as missing values.
+-- Columns types have a subsumption rule which dictates when we upcast the type of the values in column. If we
+-- have a column of Int values with a single String element in the middle of the data then then we upcast to
+-- String. If the user specifes (Maybe a) type for the column then the column treats mismatched values as
+-- missing values.
 --
 -- a <: a
 -- a <: b |- Maybe a <: Maybe b
@@ -35,8 +37,8 @@ import Data.Text (Text, pack)
 subsumes :: Type -> Type -> Bool
 subsumes ST _  = True
 subsumes DT IT = True
-subsumes (MT a) (MT b) = subsumes a b
-subsumes _ _ = False
+subsumes (MT a) b = subsumes a b
+subsumes a b = a == b
 
 subsume :: Type -> Val -> Val
 subsume ST v = case v of
@@ -90,3 +92,36 @@ typeVal (S _) = ST
 typeVal (B _) = BT
 typeVal (T _) = TT
 typeVal (M _) = error "maybe type"
+
+-- lub [I 3, D 2.3] -> DT
+-- lub [I 3, D 2.3, S "a"] -> ST
+
+lub :: [Val] -> Either String Type
+lub vals = go Nothing vals
+  where
+    go (Just lub) [] = Right lub
+    go Nothing (x:xs) = go (Just (typeVal x)) xs
+    go (Just lub) (x:xs)
+      | lub == typeVal x         = go (Just lub) xs
+      | lub `subsumes` typeVal x = go (Just lub) xs
+      | typeVal x `subsumes` lub = go (Just (typeVal x)) xs
+      | otherwise                = Left "No subsumption"
+
+-- lubNa [I 3, D 2.3] -> DT
+-- lubNa [I 3, D 2.3, S "a"] -> ST
+-- lubNa [I 3, D 2.3, B True] -> (M DT, [2])
+
+lubNa :: [Val] -> (Type, [Int])
+lubNa vals = go Nothing (zip vals [0..]) []
+  where
+    go (Just lub) [] !miss = (lub, miss)
+    go Nothing ((x,_):xs) !miss = go (Just (typeVal x)) xs miss
+    go (Just lub) ((x,i):xs) !miss
+      | lub == typeVal x         = go (Just lub) xs miss
+      | lub `subsumes` typeVal x = go (Just lub) xs miss
+      | typeVal x `subsumes` lub = go (Just (typeVal x)) xs miss
+      | otherwise                = go (Just (maybe lub)) xs (i:miss)
+
+    maybe :: Type -> Type
+    maybe (MT a) = MT a
+    maybe a = (MT a)
