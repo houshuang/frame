@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BangPatterns #-}
 
 {-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
 
@@ -14,7 +13,6 @@ module Data.Frame.CSV (
   testSubsume,
 ) where
 
-import Debug.Trace
 import Data.Frame.Types
 import Data.Frame.HFrame
 import Data.Frame.Internal (def, Default)
@@ -89,7 +87,7 @@ refine :: [[Val]] -> Either String [Block]
 refine cols = do
   tys <- refineFrame cols
   let svals = zipWith subsumeColumn tys cols
-  return $ zipWith refineBlock (traceShow (show tys) tys) svals
+  return $ zipWith refineBlock tys svals
 
 subsumeColumn :: Type -> [Val] -> [Val]
 subsumeColumn ty xs = fmap (subsume ty) xs
