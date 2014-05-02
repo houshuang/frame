@@ -40,7 +40,7 @@ Usage
 
 Subject to change but the initial API.
 
-```haskell
+```bash
 
 λ: import import Data.Frame.HFrame
 λ: import import Data.Frame.CSV
