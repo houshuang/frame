@@ -9,13 +9,13 @@ module Data.Frame.Types (
   subsume,
   like,
   typeVal,
-  lub,
-  lubNa
+  lub
 ) where
 
 import Data.Data
 import Data.DateTime
 import Data.Text (Text, pack)
+import Data.Frame.Internal (Default(..))
 
 -------------------------------------------------------------------------------
 -- Types
@@ -35,9 +35,13 @@ import Data.Text (Text, pack)
 -- Int      <: Double
 
 subsumes :: Type -> Type -> Bool
-subsumes ST _  = True
-subsumes DT IT = True
 subsumes (MT a) b = subsumes a b
+subsumes ST DT  = True
+subsumes ST BT  = True
+subsumes ST IT  = True
+subsumes ST TT  = True
+subsumes DT IT = True
+subsumes _ Any = True
 subsumes a b = a == b
 
 subsume :: Type -> Val -> Val
@@ -48,16 +52,31 @@ subsume ST v = case v of
   B True  -> S (pack "true")
   B False -> S (pack "false")
   T x -> S (pack $ show x)
-  M x -> error "maybe case"
+  {-M x -> error "maybe case"-}
 subsume DT v = case v of
   D x -> D x
   I x -> D (fromIntegral x)
-  M x -> error "maybe case"
+  {-M x -> error "maybe case"-}
 subsume IT v = case v of
   I x -> I x
   M x -> error "maybe case"
 subsume BT v = case v of
   B x -> B x
+
+subsume (MT IT) v = case v of
+  I x -> I x
+  _   -> NA
+subsume (MT DT) v = case v of
+  D x -> D x
+  I x -> D (fromIntegral x)
+  _   -> NA
+subsume (MT ST) v = case v of
+  S x -> S x
+  _   -> NA
+subsume (MT BT) v = case v of
+  B x -> B x
+  _   -> NA
+subsume (MT Any) v = NA
 
 like :: Val -> Val -> Bool
 like (D _) (D _) = True
@@ -72,7 +91,7 @@ like (M (Nothing)) (M (Just _)) = True
 like (M (Nothing)) (M Nothing)  = True
 like _ _ = False
 
-data Type = DT | IT | ST | BT | MT Type | TT
+data Type = DT | IT | ST | BT | MT Type | TT | Any
   deriving (Eq, Show, Ord)
 
 -- Heterogeneous value
@@ -83,6 +102,7 @@ data Val
   | B !Bool
   | M !(Maybe Val)
   | T !DateTime
+  | NA
   deriving (Eq, Show, Ord, Data, Typeable)
 
 typeVal :: Val -> Type
@@ -91,7 +111,9 @@ typeVal (I _) = IT
 typeVal (S _) = ST
 typeVal (B _) = BT
 typeVal (T _) = TT
-typeVal (M _) = error "maybe type"
+typeVal (M (Just t)) = MT (typeVal t)
+typeVal (M Nothing) = Any
+typeVal NA = Any
 
 -- lub [I 3, D 2.3] -> DT
 -- lub [I 3, D 2.3, S "a"] -> ST
@@ -100,28 +122,23 @@ lub :: [Val] -> Either String Type
 lub vals = go Nothing vals
   where
     go (Just lub) [] = Right lub
+    go Nothing (NA:xs) = goNa Nothing xs -- first value is a NA
     go Nothing (x:xs) = go (Just (typeVal x)) xs
     go (Just lub) (x:xs)
+      | typeVal x == Any         = goNa (Just (maybeT lub)) xs -- we hit a NA midstream
       | lub == typeVal x         = go (Just lub) xs
       | lub `subsumes` typeVal x = go (Just lub) xs
       | typeVal x `subsumes` lub = go (Just (typeVal x)) xs
-      | otherwise                = Left "No subsumption"
+      | otherwise                = Left $ "No subsumption: " ++ (show lub) ++ " ~ " ++ (show $ typeVal x)
 
--- lubNa [I 3, D 2.3] -> DT
--- lubNa [I 3, D 2.3, S "a"] -> ST
--- lubNa [I 3, D 2.3, B True] -> (M DT, [2])
+    goNa Nothing (x:xs) = goNa (Just (typeVal x)) xs
+    goNa (Just lub) [] = Right lub
+    goNa (Just lub) (x:xs)
+      | lub == typeVal x         = goNa (Just lub) xs
+      | lub `subsumes` typeVal x = goNa (Just lub) xs
+      | maybeT (typeVal x) `subsumes` lub = goNa (Just (maybeT (typeVal x))) xs
+      | otherwise                = goNa (Just lub) xs -- missing case
 
-lubNa :: [Val] -> (Type, [Int])
-lubNa vals = go Nothing (zip vals [0..]) []
-  where
-    go (Just lub) [] !miss = (lub, miss)
-    go Nothing ((x,_):xs) !miss = go (Just (typeVal x)) xs miss
-    go (Just lub) ((x,i):xs) !miss
-      | lub == typeVal x         = go (Just lub) xs miss
-      | lub `subsumes` typeVal x = go (Just lub) xs miss
-      | typeVal x `subsumes` lub = go (Just (typeVal x)) xs miss
-      | otherwise                = go (Just (maybe lub)) xs (i:miss)
-
-    maybe :: Type -> Type
-    maybe (MT a) = MT a
-    maybe a = (MT a)
+maybeT :: Type -> Type
+maybeT (MT a) = MT a
+maybeT a = (MT a)

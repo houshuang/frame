@@ -5,6 +5,7 @@
 
 module Data.Frame.Instances (
   get,
+
   col,
   cols,
   colsWhere,
@@ -15,6 +16,7 @@ module Data.Frame.Instances (
   rowsWhere,
 
   drop,
+  take,
   head,
   tail,
   last,
@@ -30,6 +32,7 @@ module Data.Frame.Instances (
 
 import Prelude hiding (drop, take, head, last, tail, null)
 
+import Data.List (genericLength)
 import Data.Frame.HFrame
 import Data.Frame.Internal (Columnable, _Data, _Index, _filterKeys)
 import qualified Data.Frame.Internal as I
@@ -155,3 +158,6 @@ last = _alter (VG.singleton . VG.last) (VG.singleton . VG.last)
 
 tail :: HDataFrame a k -> HDataFrame a k
 tail = _alter (VG.tail) (VG.tail)
+
+avg :: (Real a, Fractional b) => [a] -> b
+avg xs = realToFrac (sum xs) / genericLength xs

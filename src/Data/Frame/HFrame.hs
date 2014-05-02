@@ -26,6 +26,7 @@ module Data.Frame.HFrame (
   bblock,
   mblock,
   sblock,
+  nblock,
 
   blen,
   btraverse,
@@ -96,12 +97,16 @@ mblock dat@(SBlock _) mask = MBlock dat (VU.fromList mask)
 mblock (MBlock dat _) mask = MBlock dat (VU.fromList mask)
 mblock _ _ = error "unsupported masked block"
 
+nblock :: [a] -> Block
+nblock = const NBlock
+
 blen :: Block -> Int
 blen (IBlock xs) = VU.length xs
 blen (DBlock xs) = VU.length xs
 blen (BBlock xs) = VU.length xs
 blen (SBlock xs) = VB.length xs
 blen (MBlock xs _) = blen xs
+blen NBlock = 0
 
 -------------------------------------------------------------------------------
 -- Block Traversals
@@ -206,8 +211,6 @@ alignCols :: [(k, Block)] -> [(k, Block)]
 alignCols xs = zip a (alignVecs b)
   where (a, b) = unzip xs
 
--- Pad the index with neutral elements, shouldn't really be used.
-{-alignIndex :: (Default i, Indexable i) => Index i -> Int -> Index i-}
 alignIndex ix n = pad (n - VU.length ix) (ixto ix)
 
 hcat :: (Eq i, Eq k, Hashable k) => HDataFrame i k -> HDataFrame i k -> HDataFrame i k
@@ -227,8 +230,8 @@ unMask (MBlock dat bm) = do
   return $ go dat' (VU.toList bm)
   where
     go [] [] = []
-    go (x:xs) (True:ys)  = Nothing : go xs ys
-    go (x:xs) (False:ys) = Just x : go xs ys
+    go (x:xs) (True:ys)  = Just x : go xs ys
+    go (x:xs) (False:ys) = Nothing : go xs ys
 
     -- won't compile if this isn't guaranteed
 

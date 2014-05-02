@@ -15,6 +15,7 @@
 module Data.Frame.Internal (
   HDataFrame(..),
   Block(..),
+  IxRep,
   --Index,
 
   _filterKeys,
@@ -39,6 +40,7 @@ module Data.Frame.Internal (
   _MBlock,
   _SBlock,
   _NBlock
+
 ) where
 
 import Data.Foldable
@@ -135,20 +137,8 @@ _filterKeys :: (k -> Bool) -> M.HashMap k v -> M.HashMap k v
 _filterKeys f xs = M.filterWithKey (\k _ -> f k) xs
 
 -------------------------------------------------------------------------------
--- Blocks
+-- Default Values
 -------------------------------------------------------------------------------
-
-data Block
-  = DBlock !(VU.Vector Double)
-  | IBlock !(VU.Vector Int)
-  | BBlock !(VU.Vector Bool)
-  | MBlock {
-     _mdata  :: !Block
-   , _bitmap :: !(VU.Vector Bool)
-   }
-  | SBlock !(VB.Vector Text)
-  | NBlock
-  deriving (Eq, Show, Data, Typeable)
 
 class Default a where
   def :: a
@@ -173,6 +163,22 @@ instance Default DateTime where
 
 instance Default (Maybe a) where
   def = Nothing
+
+-------------------------------------------------------------------------------
+-- Blocks
+-------------------------------------------------------------------------------
+
+data Block
+  = DBlock !(VU.Vector Double)
+  | IBlock !(VU.Vector Int)
+  | BBlock !(VU.Vector Bool)
+  | MBlock {
+     _mdata  :: !Block
+   , _bitmap :: !(VU.Vector Bool)
+   }
+  | SBlock !(VB.Vector Text)
+  | NBlock
+  deriving (Eq, Show, Data, Typeable)
 
 _DBlock :: Prism' Block (VU.Vector Double)
 _DBlock = prism remit review
