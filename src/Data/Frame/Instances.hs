@@ -15,6 +15,7 @@ module Data.Frame.Instances (
   rows,
   rowsWhere,
 
+  swap,
   drop,
   take,
   head,
@@ -84,18 +85,18 @@ df ! k = df ^. get k
 colsWhere :: (k -> Bool) -> HDataFrame i k -> HDataFrame i k
 colsWhere k = _Data %~ _filterKeys k
 
-col :: (Eq k) => k -> HDataFrame i k -> HDataFrame i k
-col k = colsWhere (==k)
-
-cols :: (Eq k) => [k] -> HDataFrame i k -> HDataFrame i k
-cols ks = colsWhere (`elem` ks)
-
 rowsWhere :: (i -> Bool) -> HDataFrame i k -> HDataFrame i k
 rowsWhere f df =
   let indexMatcher = vFilter f (df ^. _Index) in
   -- XXX why does inference break under CSE here?
   df & (_Data.traverse %~ btraverse (vFilter f (df ^. _Index)))
      . (_Index %~ indexMatcher)
+
+col :: (Eq k) => k -> HDataFrame i k -> HDataFrame i k
+col k = colsWhere (==k)
+
+cols :: (Eq k) => [k] -> HDataFrame i k -> HDataFrame i k
+cols ks = colsWhere (`elem` ks)
 
 row :: Eq i => i -> HDataFrame i k -> HDataFrame i k
 row i = rowsWhere (==i)
@@ -112,6 +113,10 @@ vFilter :: (VG.Vector v1 a, VG.Vector v1 Bool, VG.Vector v a1)
 vFilter f xs ys = VG.ifilter (\i _ -> (ms VG.! i) == True) ys
   where ms = VG.map f xs
 
+swap :: (Eq k, Hashable k) => k -> k -> HDataFrame i k -> HDataFrame i k
+swap k1 k2 df = df & ((_Data.ix k1) .~ (df ^. _Data.ix k2))
+                   . ((_Data.ix k2) .~ (df ^. _Data.ix k1))
+
 -------------------------------------------------------------------------------
 -- Mutators
 -------------------------------------------------------------------------------
@@ -119,8 +124,8 @@ vFilter f xs ys = VG.ifilter (\i _ -> (ms VG.! i) == True) ys
 -- This doesn't in general maintain the invariant that the index is the same length as all the blocks.
 
 _blocks :: (forall v a. VG.Vector v a => v a -> v a)
-        -> HDataFrame a k
-        -> HDataFrame a k
+        -> HDataFrame i k
+        -> HDataFrame i k
 _blocks f = _Data.traverse %~ btraverse f
 
 _index :: (VB.Vector a -> VB.Vector a)

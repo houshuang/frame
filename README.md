@@ -79,7 +79,7 @@ Subject to change but the initial API.
 λ: take 5 <$> ages
 Success [Just 29.0,Just 0.916700006,Just 2.0,Just 30.0,Just 25.0]
 
-λ: avg <$> fmap catMaybes ages
+λ: avg <$> catMaybes <$> ages
 Success 29.881134512434034
 ```
 
