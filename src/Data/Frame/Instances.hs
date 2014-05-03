@@ -87,10 +87,11 @@ colsWhere k = _Data %~ _filterKeys k
 
 rowsWhere :: (i -> Bool) -> HDataFrame i k -> HDataFrame i k
 rowsWhere f df =
-  let indexMatcher = vFilter f (df ^. _Index) in
   -- XXX why does inference break under CSE here?
   df & (_Data.traverse %~ btraverse (vFilter f (df ^. _Index)))
      . (_Index %~ indexMatcher)
+   where
+      indexMatcher = vFilter f (df ^. _Index)
 
 col :: (Eq k) => k -> HDataFrame i k -> HDataFrame i k
 col k = colsWhere (==k)

@@ -74,13 +74,13 @@ Subject to change but the initial API.
 19  A     36.0         0         Beattie, Mr. Thomson             male  
 20  5     37.0         1         Beckwith, Mr. Richard Leonard    male  
 
-λ: let ages = frame ^. get "age" :: Result [Maybe Double]
+λ: let Success ages = frame ^. get "age" :: Result [Maybe Double]
 
-λ: take 5 <$> ages
-Success [Just 29.0,Just 0.916700006,Just 2.0,Just 30.0,Just 25.0]
+λ: take 5 ages
+[Just 29.0,Just 0.916700006,Just 2.0,Just 30.0,Just 25.0]
 
-λ: avg <$> catMaybes <$> ages
-Success 29.881134512434034
+λ: avg $ catMaybes ages
+29.881134512434034
 ```
 
 License
