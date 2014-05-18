@@ -43,7 +43,7 @@ module Data.Frame.HFrame (
 
 ) where
 
-import Prelude hiding (maximum, sum, filter, drop, take, null)
+import Prelude hiding (maximum, null)
 
 import Control.Monad hiding (
     forM , forM_ , mapM , mapM_ , msum , sequence , sequence_ )
@@ -68,7 +68,7 @@ import Data.Monoid
 import Data.DateTime
 import Data.Hashable (Hashable(..))
 
-import Data.Text (Text, pack, unpack)
+import Data.Text (Text, unpack)
 import qualified Text.PrettyPrint.Boxes as PB
 
 import qualified GHC.Float as GHC
@@ -118,6 +118,7 @@ btraverse f (DBlock xs) = DBlock (f xs)
 btraverse f (BBlock xs) = BBlock (f xs)
 btraverse f (SBlock xs) = SBlock (f xs)
 btraverse f (MBlock a b) = MBlock (btraverse f a) (f b)
+btraverse _ NBlock = NBlock
 
 -------------------------------------------------------------------------------
 -- Block Typing
@@ -168,7 +169,7 @@ instance Monoid Block where
   mempty = NBlock
   mappend a NBlock = a
   mappend NBlock a = a
-  mappend a b = a -- XXX
+  mappend a b      = a -- XXX
 
 schema :: HDataFrame t k -> [(k, String)]
 schema (HDataFrame dt _) = fmap (fmap $ show . toConstr) (M.toList dt)
@@ -198,6 +199,7 @@ instance Paddable Block where
   pad n (DBlock x) = DBlock $ pad n x
   pad n (SBlock x) = SBlock $ pad n x
   pad n (MBlock x bm) = MBlock (pad n x) (pad n bm)
+  pad _ NBlock = NBlock
 
 alignVecs :: [Block] -> [Block]
 alignVecs xs = fmap (pad mlen) xs
@@ -243,10 +245,10 @@ reMask xs = MBlock (toBlock $ map go xs) (VU.fromList $ map isJust xs)
     go Nothing = def
 
 mapMask :: VU.Unbox a =>
-           (a -> a) ->       -- transformation
-           VU.Vector a ->     -- data
-           VU.Vector Bool ->  -- mask
-           VU.Vector a
+           (a -> a)         -- transformation
+        -> VU.Vector a      -- data
+        -> VU.Vector Bool   -- mask
+        -> VU.Vector a
 mapMask f xs ys = VU.zipWith (go f) xs ys
   where
     go :: (a -> a) -> a -> Bool -> a
