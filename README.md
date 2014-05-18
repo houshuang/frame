@@ -46,8 +46,8 @@ Subject to change but the initial API.
 ```bash
 λ: Control.Lens
 
-λ: import import Data.Frame.HFrame
-λ: import import Data.Frame.CSV
+λ: import Data.Frame.HFrame
+λ: import Data.Frame.CSV
 
 λ: Right frame <- fromCsvHeaders "examples/titanic.csv"
 
