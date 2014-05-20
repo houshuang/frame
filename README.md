@@ -44,7 +44,7 @@ Usage
 Subject to change but the initial API.
 
 ```bash
-λ: Control.Lens
+λ: import Control.Lens
 
 λ: import Data.Frame.HFrame
 λ: import Data.Frame.CSV
