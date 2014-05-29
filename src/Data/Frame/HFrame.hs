@@ -37,6 +37,7 @@ module Data.Frame.HFrame (
   schema,
 
   null,
+  groupBy,
   fromMap,
   fromBlocks,
   singleton,
@@ -347,3 +348,23 @@ nrows (HDataFrame dt _) = blen $ snd $ head (M.toList dt)
 
 ncols :: HDataFrame i k -> Int
 ncols (HDataFrame dt _) = M.size dt
+
+-- Stolen from <http://hackage.haskell.org/packages/archive/storablevector/latest/doc/html/src/Data-StorableVector.html#groupBy>
+groupBy :: VG.Vector v a => (a -> a -> Bool) -> v a -> [v a]
+groupBy k xs =
+   switchL []
+      (\ h t ->
+          let n = 1 + findIndexOrEnd (not . k h) t
+          in  VG.unsafeTake n xs : groupBy k (VG.unsafeDrop n xs))
+      xs
+
+findIndexOrEnd p xs =
+  VG.foldr
+    (\x k n ->
+       if p x then n else k (succ n))
+    id xs 0
+
+switchL n j x =
+  if VG.null x
+    then n
+    else j (VG.unsafeHead x) (VG.unsafeTail x)
