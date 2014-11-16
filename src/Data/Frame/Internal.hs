@@ -9,6 +9,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE CPP #-}
 
 {-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
 
@@ -232,6 +233,11 @@ _NBlock = prism remit review
 -------------------------------------------------------------------------------
 -- Block Type
 -------------------------------------------------------------------------------
+
+-- ref: https://www.haskell.org/pipermail/libraries/2011-July/016548.html
+#if MIN_VERSION_base(4,7,0)
+mkTyCon = mkTyCon3 "frame" "Data.Frame.Internal"
+#endif
 
 blockType :: Block -> TypeRep
 blockType (DBlock _) = typeOf (0.0 :: Double)
