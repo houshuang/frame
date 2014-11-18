@@ -53,7 +53,7 @@ import qualified Data.HashMap.Strict as M
 import Data.Data
 import Data.Monoid
 import Control.DeepSeq (NFData(..))
-import Data.DateTime
+-- import Data.DateTime
 import Data.Hashable (Hashable(..))
 
 import Data.Text (Text, pack, empty)
@@ -75,7 +75,7 @@ type instance IxRep String   = String
 type instance IxRep Double   = Double
 type instance IxRep Float    = Float
 type instance IxRep Bool     = Bool
-type instance IxRep DateTime = Int
+-- type instance IxRep DateTime = Int
 
 class (Eq k, Show k, Hashable k) => Columnable k where
 class (Ord i, Show i, VU.Unbox (IxRep i), Default i) => Indexable i where
@@ -103,10 +103,10 @@ instance Indexable Bool where
   ixto = id
   ixfrom = id
 
-instance Indexable DateTime where
-  -- maxint(64) is 21 times the age of the unvierse, so we should be good for a while
-  ixto = fromIntegral . toSeconds
-  ixfrom = fromSeconds . fromIntegral
+--instance Indexable DateTime where
+--  -- maxint(64) is 21 times the age of the unvierse, so we should be good for a while
+--  ixto = fromIntegral . toSeconds
+--  ixfrom = fromSeconds . fromIntegral
 
 -------------------------------------------------------------------------------
 -- Frame
@@ -157,8 +157,8 @@ instance Default Float where
 instance Default Text where
   def = pack ""
 
-instance Default DateTime where
-  def = startOfTime
+--instance Default DateTime where
+--  def = startOfTime
 
 instance Default (Maybe a) where
   def = Nothing

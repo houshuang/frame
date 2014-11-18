@@ -27,7 +27,7 @@ import Data.Data
 import Data.Maybe
 import Data.List (transpose)
 import Data.Text (Text, pack)
-import Data.DateTime
+-- import Data.DateTime
 import qualified Data.Vector as V
 
 import Data.Text.Encoding (decodeUtf8)

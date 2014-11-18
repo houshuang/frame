@@ -66,7 +66,7 @@ import qualified Data.HashMap.Strict as M
 import Data.Data
 import Data.Maybe
 import Data.Monoid
-import Data.DateTime
+-- import Data.DateTime
 import Data.Hashable (Hashable(..))
 
 import Data.Text (Text, unpack)

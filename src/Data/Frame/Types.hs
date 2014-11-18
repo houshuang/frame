@@ -13,7 +13,7 @@ module Data.Frame.Types (
 ) where
 
 import Data.Data
-import Data.DateTime
+-- import Data.DateTime
 import Data.Text (Text, pack)
 import Data.Frame.Internal (Default(..))
 import Control.DeepSeq (NFData(..))
@@ -52,7 +52,7 @@ subsume ST v = case v of
   S x -> S x
   B True  -> S (pack "true")
   B False -> S (pack "false")
-  T x -> S (pack $ show x)
+  -- T x -> S (pack $ show x)
   {-M x -> error "maybe case"-}
 subsume DT v = case v of
   D x -> D x
@@ -84,7 +84,7 @@ like (D _) (D _) = True
 like (I _) (I _) = True
 like (S _) (S _) = True
 like (B _) (B _) = True
-like (T _) (T _) = True
+-- like (T _) (T _) = True
 
 like (M (Just a)) (M (Just b))  = like a b
 like (M (Just _)) (M Nothing)   = True
@@ -102,7 +102,7 @@ data Val
   | S {-# UNPACK #-} !Text
   | B !Bool
   | M !(Maybe Val)
-  | T !DateTime
+  -- | T !DateTime
   | NA
   deriving (Eq, Show, Ord, Data, Typeable)
 
@@ -112,7 +112,7 @@ instance NFData Val where
   rnf (S _) = ()
   rnf (B a) = rnf a
   rnf (M a) = rnf a
-  rnf (T a) = rnf a
+  -- rnf (T a) = rnf a
   rnf NA = ()
 
 typeVal :: Val -> Type
@@ -120,7 +120,7 @@ typeVal (D _) = DT
 typeVal (I _) = IT
 typeVal (S _) = ST
 typeVal (B _) = BT
-typeVal (T _) = TT
+-- typeVal (T _) = TT
 typeVal (M (Just t)) = MT (typeVal t)
 typeVal (M Nothing) = Any
 typeVal NA = Any
