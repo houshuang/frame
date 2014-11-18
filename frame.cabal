@@ -8,7 +8,7 @@ copyright:           2014 Stephen Diehl
 Category:            Math
 build-type:          Simple
 cabal-version:       >=1.10
-tested-with:         GHC == 7.6.1
+tested-with:         GHC == 7.6.1, GHC == 7.8.3
 
 Source-Repository head
     Type: git
