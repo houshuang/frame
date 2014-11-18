@@ -19,6 +19,9 @@ module Data.Frame.HFrame (
   transformKeys,
 
   hcat,
+  vcat,
+  concatBlocks,
+  schemaEq,
 
   Block(..),
   dblock,
@@ -66,7 +69,7 @@ import qualified Data.HashMap.Strict as M
 import Data.Data
 import Data.Maybe
 import Data.Monoid
--- import Data.DateTime
+import Data.Function (on)
 import Data.Hashable (Hashable(..))
 
 import Data.Text (Text, unpack)
@@ -215,6 +218,23 @@ alignCols xs = zip a (alignVecs b)
   where (a, b) = unzip xs
 
 alignIndex ix n = pad (n - VU.length ix) (ixto ix)
+
+vcat :: (Eq i, Eq k, Hashable k) => HDataFrame i k -> HDataFrame i k -> HDataFrame i k
+vcat x@(HDataFrame dt ix) y@(HDataFrame dt' ix')
+  | not $ schemaEq x y = error "Schemas have to be identical for vertical concatenation"
+  | otherwise = HDataFrame (M.unionWith concatBlocks dt dt') ((VB.++) ix ix')
+
+concatBlocks :: Block -> Block -> Block
+concatBlocks (IBlock x) (IBlock x') = IBlock ((VU.++) x x')
+concatBlocks (BBlock x) (BBlock x') = BBlock ((VU.++) x x')
+concatBlocks (DBlock x) (DBlock x') = DBlock ((VU.++) x x')
+concatBlocks (SBlock x) (SBlock x') = SBlock ((VB.++) x x')
+concatBlocks (MBlock x y) (MBlock x' y') = MBlock (concatBlocks x x') ((VU.++) y y')
+concatBlocks NBlock NBlock = NBlock
+concatBlocks _ _ = error "Cannot concatenate blocks of different types"
+
+schemaEq :: (Eq i, Eq k, Hashable k) => HDataFrame i k -> HDataFrame i k -> Bool
+schemaEq = on (==) $ M.fromList . schema
 
 hcat :: (Eq i, Eq k, Hashable k) => HDataFrame i k -> HDataFrame i k -> HDataFrame i k
 hcat (HDataFrame dt ix) (HDataFrame dt' ix') = HDataFrame (alignMaps $ M.union dt dt') maxIx
