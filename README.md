@@ -42,7 +42,8 @@ $ cabal haddock
 Usage
 -----
 
-Subject to change but the initial API.
+The API is subject to change but the initial API looks something like the
+following:
 
 ```bash
 λ: import Control.Lens
