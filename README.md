@@ -1,8 +1,9 @@
 frame
 =====
 
-A simple experiment in building a Pandas style dataframe in Haskell.
+[![Build Status](https://travis-ci.org/sdiehl/frame.svg)](https://travis-ci.org/sdiehl/frame)
 
+A simple experiment in building a Pandas style dataframe in Haskell.
 
 Data.Frame.HFrame
 -----------------
