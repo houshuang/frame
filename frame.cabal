@@ -18,6 +18,7 @@ library
   exposed-modules:
     Data.Frame
     Data.Frame.Instances
+    Data.Frame.Internal
     Data.Frame.HFrame
     Data.Frame.Pretty
     Data.Frame.CSV
