@@ -23,6 +23,8 @@ library
     Data.Frame.Pretty
     Data.Frame.CSV
     Data.Frame.Interactive
+  other-modules:
+    Data.Frame.Types
 
   ghc-options:
     -- -Wall
